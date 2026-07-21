@@ -1,0 +1,20 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: saas-cms-lms-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: saas-cms-lms-db
+      MYSQL_ROOT_PASSWORD: password
+    ports:
+      - "3306:3306"
+    volumes:
+      - saas_cms_lms_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ppassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  saas_cms_lms_mysql:

@@ -1,0 +1,888 @@
+import { Router } from "express";
+import { asyncHandler } from "../../lib/errors.js";
+import {
+  authenticate,
+  requireEntitlement,
+  requireModule,
+  requirePermission,
+  requireTenant,
+} from "../../middleware/auth.middleware.js";
+import { auditTenantMutation } from "../../middleware/audit.middleware.js";
+import {
+  createRoleController,
+  createUserController,
+  deleteRoleController,
+  listPermissionsController,
+  listRolesController,
+  listUsersController,
+  updateRoleController,
+  updateUserController,
+} from "../../modules/access/access.controller.js";
+import {
+  assignSubjectController,
+  createClassController,
+  createClassSectionController,
+  createSectionController,
+  createSessionController,
+  createSubjectController,
+  deleteAcademicRecordController,
+  getAcademicSetupController,
+  setCurrentSessionController,
+  updateClassController,
+  updateClassSectionController,
+  updateSectionController,
+  updateSubjectController,
+} from "../../modules/academics/academics.controller.js";
+import {
+  acceptOnlineAdmissionController,
+  createStudentController,
+  createStudentMasterController,
+  deleteStudentMasterController,
+  deleteStudentsController,
+  detectSiblingsController,
+  getStudentDetailController,
+  getStudentSetupController,
+  importStudentsController,
+  linkSiblingsController,
+  listOnlineAdmissionsController,
+  listStudentsController,
+  rejectOnlineAdmissionController,
+  updateStudentController,
+  addEnrollmentController,
+} from "../../modules/students/students.controller.js";
+import {
+  createCampusNoticeController,
+  deleteCampusNoticeController,
+  listCampusNoticesController,
+} from "../../modules/portal/portal.controller.js";
+import {
+  getSettingsController,
+  updateSettingsController,
+} from "../../modules/settings/settings.controller.js";
+import {
+  assignFeeMasterController,
+  carryForwardPreviousDuesController,
+  collectPaymentController,
+  createFeeDiscountController,
+  createFeeGroupController,
+  createFeeMasterController,
+  createFeeTypeController,
+  createReceiptBookController,
+  getFeeSetupController,
+  getFeeSummaryController,
+  listStudentFeesController,
+  revertPaymentController,
+  searchPaymentsController,
+  updateAssignmentDiscountController,
+  updateFeeReminderController,
+} from "../../modules/fees/fees.controller.js";
+import {
+  awardAttendancePointsController,
+  createLeaveController,
+  getAttendancePointsController,
+  getAttendanceReportController,
+  getAttendanceSetupController,
+  listLeavesController,
+  markAttendanceController,
+  reviewLeaveController,
+} from "../../modules/attendance/attendance.controller.js";
+import {
+  addMarkComponentController,
+  assignExamStudentsController,
+  createExamAspectController,
+  createExamController,
+  createExamGradeController,
+  createExamGroupController,
+  createExamScheduleController,
+  getExamResultsController,
+  getExamGroupResultsController,
+  getExamSetupController,
+  getScheduleRosterController,
+  publishExamController,
+  saveAspectValuesController,
+  saveExamMarksController,
+} from "../../modules/exams/exams.controller.js";
+import {
+  addStaffAdjustmentController,
+  addTeacherRatingController,
+  applyStaffLeaveController,
+  createDepartmentController,
+  createDesignationController,
+  createStaffLeaveTypeController,
+  createStaffProfileController,
+  generatePayrollController,
+  getHrSetupController,
+  getStaffAttendanceReportController,
+  markStaffAttendanceController,
+  payPayrollController,
+  reviewStaffLeaveController,
+  updateStaffStatusController,
+} from "../../modules/hr/hr.controller.js";
+import {
+  createDocumentTemplateController,
+  generateDocumentController,
+  getGeneratedDocumentController,
+  listDocumentTemplatesController,
+  listGeneratedDocumentsController,
+  updateDocumentTemplateController,
+} from "../../modules/documents/documents.controller.js";
+import {
+  getReportHubController,
+  runModuleReportController,
+} from "../../modules/reports/reports.controller.js";
+import {
+  createTimetableEntryController,
+  deleteTimetableEntryController,
+  getFreePeriodReportController,
+  getTimetableSetupController,
+  updateTimetableEntryController,
+} from "../../modules/timetable/timetable.controller.js";
+import {
+  createHomeworkController,
+  evaluateHomeworkSubmissionController,
+  getHomeworkReportController,
+  getHomeworkSetupController,
+  getHomeworkSubmissionsController,
+  submitHomeworkController,
+  updateHomeworkController,
+} from "../../modules/homework/homework.controller.js";
+import {
+  createConfigurationBackupController,
+  createCustomFieldController,
+  createDocumentFolderController,
+  createHolidayController,
+  createPaymentMethodController,
+  createStudentDocumentController,
+  deleteCustomFieldController,
+  deleteHolidayController,
+  deletePaymentMethodController,
+  deleteStudentDocumentController,
+  getErpSetupController,
+  restoreConfigurationBackupController,
+  updateCustomFieldController,
+  updateIntegrationController,
+  updatePaymentMethodController,
+  upsertLanguageController,
+  upsertModuleController,
+  upsertProfileRightController,
+  upsertShortcutController,
+  upsertSystemFieldController,
+} from "../../modules/erp/erp.controller.js";
+
+
+
+const campusRouter = Router();
+campusRouter.use(authenticate, requireTenant);
+campusRouter.use(auditTenantMutation);
+campusRouter.use("/students", requireModule("students"));
+campusRouter.use("/academics", requireModule("academics"));
+campusRouter.use("/fees", requireEntitlement("CMS"), requireModule("fees"));
+campusRouter.use("/attendance", requireModule("attendance"));
+campusRouter.use("/exams", requireModule("examinations"));
+campusRouter.use("/hr", requireEntitlement("CMS"), requireModule("hr"));
+campusRouter.use("/documents", requireEntitlement("CMS"), requireModule("documents"));
+campusRouter.use("/reports", requireModule("reports"));
+campusRouter.use("/timetable", requireEntitlement("LMS"), requireModule("timetable"));
+campusRouter.use("/homework", requireEntitlement("LMS"), requireModule("homework"));
+campusRouter.use("/homework-reports", requireEntitlement("LMS"), requireModule("homework"));
+
+campusRouter.get(
+  "/settings",
+  requirePermission("settings.view"),
+  asyncHandler(getSettingsController),
+);
+campusRouter.put(
+  "/settings",
+  requirePermission("settings.manage"),
+  asyncHandler(updateSettingsController),
+);
+
+campusRouter.get(
+  "/notices",
+  requirePermission("settings.view"),
+  asyncHandler(listCampusNoticesController),
+);
+campusRouter.post(
+  "/notices",
+  requirePermission("settings.manage"),
+  asyncHandler(createCampusNoticeController),
+);
+campusRouter.delete(
+  "/notices/:id",
+  requirePermission("settings.manage"),
+  asyncHandler(deleteCampusNoticeController),
+);
+
+campusRouter.get(
+  "/permissions",
+  requirePermission("roles.view"),
+  asyncHandler(listPermissionsController),
+);
+campusRouter.get("/roles", requirePermission("roles.view"), asyncHandler(listRolesController));
+campusRouter.post("/roles", requirePermission("roles.manage"), asyncHandler(createRoleController));
+campusRouter.put("/roles/:id", requirePermission("roles.manage"), asyncHandler(updateRoleController));
+campusRouter.delete(
+  "/roles/:id",
+  requirePermission("roles.manage"),
+  asyncHandler(deleteRoleController),
+);
+campusRouter.get("/users", requirePermission("users.view"), asyncHandler(listUsersController));
+campusRouter.post("/users", requirePermission("users.manage"), asyncHandler(createUserController));
+campusRouter.put("/users/:id", requirePermission("users.manage"), asyncHandler(updateUserController));
+
+campusRouter.get(
+  "/academics/setup",
+  requirePermission("academics.view"),
+  asyncHandler(getAcademicSetupController),
+);
+campusRouter.post(
+  "/academic-sessions",
+  requirePermission("sessions.manage"),
+  asyncHandler(createSessionController),
+);
+campusRouter.put(
+  "/academic-sessions/:id/current",
+  requirePermission("sessions.manage"),
+  asyncHandler(setCurrentSessionController),
+);
+campusRouter.post(
+  "/academics/classes",
+  requirePermission("academics.manage"),
+  asyncHandler(createClassController),
+);
+campusRouter.put(
+  "/academics/classes/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateClassController),
+);
+campusRouter.post(
+  "/academics/sections",
+  requirePermission("academics.manage"),
+  asyncHandler(createSectionController),
+);
+campusRouter.put(
+  "/academics/sections/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateSectionController),
+);
+campusRouter.post(
+  "/academics/subjects",
+  requirePermission("academics.manage"),
+  asyncHandler(createSubjectController),
+);
+campusRouter.put(
+  "/academics/subjects/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateSubjectController),
+);
+campusRouter.post(
+  "/academics/class-sections",
+  requirePermission("academics.manage"),
+  asyncHandler(createClassSectionController),
+);
+campusRouter.put(
+  "/academics/class-sections/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateClassSectionController),
+);
+campusRouter.post(
+  "/academics/subject-assignments",
+  requirePermission("academics.manage"),
+  asyncHandler(assignSubjectController),
+);
+campusRouter.delete(
+  "/academics/:resource/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(deleteAcademicRecordController),
+);
+
+campusRouter.get(
+  "/students/setup",
+  requirePermission("students.view"),
+  asyncHandler(getStudentSetupController),
+);
+campusRouter.get(
+  "/students/admissions",
+  requirePermission("students.view"),
+  asyncHandler(listOnlineAdmissionsController),
+);
+campusRouter.post(
+  "/students/admissions/:id/accept",
+  requirePermission("students.manage"),
+  asyncHandler(acceptOnlineAdmissionController),
+);
+campusRouter.post(
+  "/students/admissions/:id/reject",
+  requirePermission("students.manage"),
+  asyncHandler(rejectOnlineAdmissionController),
+);
+campusRouter.post(
+  "/students/import",
+  requirePermission("students.manage"),
+  asyncHandler(importStudentsController),
+);
+campusRouter.post(
+  "/students/siblings",
+  requirePermission("students.manage"),
+  asyncHandler(linkSiblingsController),
+);
+campusRouter.post(
+  "/students/delete",
+  requirePermission("students.manage"),
+  asyncHandler(deleteStudentsController),
+);
+campusRouter.get(
+  "/students",
+  requirePermission("students.view"),
+  asyncHandler(listStudentsController),
+);
+campusRouter.post(
+  "/students",
+  requirePermission("students.manage"),
+  asyncHandler(createStudentController),
+);
+campusRouter.get(
+  "/students/:id",
+  requirePermission("students.view"),
+  asyncHandler(getStudentDetailController),
+);
+campusRouter.get(
+  "/students/:id/siblings/detect",
+  requirePermission("students.view"),
+  asyncHandler(detectSiblingsController),
+);
+campusRouter.put(
+  "/students/:id",
+  requirePermission("students.manage"),
+  asyncHandler(updateStudentController),
+);
+campusRouter.post(
+  "/students/:id/enrollments",
+  requirePermission("students.manage"),
+  asyncHandler(addEnrollmentController),
+);
+campusRouter.post(
+  "/student-masters/:resource",
+  requirePermission("students.manage"),
+  asyncHandler(createStudentMasterController),
+);
+campusRouter.delete(
+  "/student-masters/:resource/:id",
+  requirePermission("students.manage"),
+  asyncHandler(deleteStudentMasterController),
+);
+
+campusRouter.get(
+  "/fees/setup",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(getFeeSetupController),
+);
+campusRouter.post(
+  "/fees/types",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(createFeeTypeController),
+);
+campusRouter.post(
+  "/fees/groups",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(createFeeGroupController),
+);
+campusRouter.post(
+  "/fees/discounts",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(createFeeDiscountController),
+);
+campusRouter.post(
+  "/fees/receipt-books",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(createReceiptBookController),
+);
+campusRouter.post(
+  "/fees/masters",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(createFeeMasterController),
+);
+campusRouter.post(
+  "/fees/masters/:id/assign",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(assignFeeMasterController),
+);
+campusRouter.put(
+  "/fees/assignments/:id/discount",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(updateAssignmentDiscountController),
+);
+campusRouter.get(
+  "/fees/students/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(listStudentFeesController),
+);
+campusRouter.post(
+  "/fees/payments",
+  requireEntitlement("CMS"),
+  requirePermission("fees.collect"),
+  asyncHandler(collectPaymentController),
+);
+campusRouter.get(
+  "/fees/payments",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(searchPaymentsController),
+);
+campusRouter.put(
+  "/fees/payments/:id/revert",
+  requireEntitlement("CMS"),
+  requirePermission("fees.collect"),
+  asyncHandler(revertPaymentController),
+);
+campusRouter.get(
+  "/fees/reports/summary",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(getFeeSummaryController),
+);
+campusRouter.put(
+  "/fees/reminders",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(updateFeeReminderController),
+);
+campusRouter.post(
+  "/fees/carry-forward",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(carryForwardPreviousDuesController),
+);
+
+campusRouter.get(
+  "/attendance/setup",
+  requirePermission("attendance.view"),
+  asyncHandler(getAttendanceSetupController),
+);
+campusRouter.post(
+  "/attendance/records",
+  requirePermission("attendance.manage"),
+  asyncHandler(markAttendanceController),
+);
+campusRouter.get(
+  "/attendance/reports",
+  requirePermission("attendance.view"),
+  asyncHandler(getAttendanceReportController),
+);
+campusRouter.post(
+  "/attendance/leaves",
+  requirePermission("attendance.manage"),
+  asyncHandler(createLeaveController),
+);
+campusRouter.get(
+  "/attendance/leaves",
+  requirePermission("attendance.view"),
+  asyncHandler(listLeavesController),
+);
+campusRouter.put(
+  "/attendance/leaves/:id/review",
+  requirePermission("attendance.manage"),
+  asyncHandler(reviewLeaveController),
+);
+campusRouter.post(
+  "/attendance/points",
+  requirePermission("attendance.manage"),
+  asyncHandler(awardAttendancePointsController),
+);
+campusRouter.get(
+  "/attendance/points",
+  requirePermission("attendance.view"),
+  asyncHandler(getAttendancePointsController),
+);
+
+campusRouter.get(
+  "/exams/setup",
+  requirePermission("exams.view"),
+  asyncHandler(getExamSetupController),
+);
+campusRouter.post(
+  "/exams/grades",
+  requirePermission("exams.manage"),
+  asyncHandler(createExamGradeController),
+);
+campusRouter.post(
+  "/exams/groups",
+  requirePermission("exams.manage"),
+  asyncHandler(createExamGroupController),
+);
+campusRouter.post(
+  "/exams",
+  requirePermission("exams.manage"),
+  asyncHandler(createExamController),
+);
+campusRouter.post(
+  "/exams/:id/schedules",
+  requirePermission("exams.manage"),
+  asyncHandler(createExamScheduleController),
+);
+campusRouter.post(
+  "/exams/:id/students",
+  requirePermission("exams.manage"),
+  asyncHandler(assignExamStudentsController),
+);
+campusRouter.post(
+  "/exams/:id/aspects",
+  requirePermission("exams.manage"),
+  asyncHandler(createExamAspectController),
+);
+campusRouter.put(
+  "/exams/:id/publish",
+  requirePermission("exams.publish"),
+  asyncHandler(publishExamController),
+);
+campusRouter.get(
+  "/exams/groups/:id/results",
+  requirePermission("exams.view"),
+  asyncHandler(getExamGroupResultsController),
+);
+campusRouter.get(
+  "/exams/:id/results",
+  requirePermission("exams.view"),
+  asyncHandler(getExamResultsController),
+);
+campusRouter.get(
+  "/exams/schedules/:id/roster",
+  requirePermission("exams.view"),
+  asyncHandler(getScheduleRosterController),
+);
+campusRouter.put(
+  "/exams/schedules/:id/marks",
+  requirePermission("exams.manage"),
+  asyncHandler(saveExamMarksController),
+);
+campusRouter.post(
+  "/exams/schedules/:scheduleId/components",
+  requirePermission("exams.manage"),
+  asyncHandler(addMarkComponentController),
+);
+campusRouter.put(
+  "/exams/aspects/:id/values",
+  requirePermission("exams.manage"),
+  asyncHandler(saveAspectValuesController),
+);
+
+campusRouter.get(
+  "/hr/setup",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(getHrSetupController),
+);
+campusRouter.post(
+  "/hr/departments",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(createDepartmentController),
+);
+campusRouter.post(
+  "/hr/designations",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(createDesignationController),
+);
+campusRouter.post(
+  "/hr/leave-types",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(createStaffLeaveTypeController),
+);
+campusRouter.post(
+  "/hr/staff",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(createStaffProfileController),
+);
+campusRouter.put(
+  "/hr/staff/:id/status",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(updateStaffStatusController),
+);
+campusRouter.post(
+  "/hr/attendance",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(markStaffAttendanceController),
+);
+campusRouter.get(
+  "/hr/attendance",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(getStaffAttendanceReportController),
+);
+campusRouter.post(
+  "/hr/leaves",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(applyStaffLeaveController),
+);
+campusRouter.put(
+  "/hr/leaves/:id/review",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(reviewStaffLeaveController),
+);
+campusRouter.post(
+  "/hr/staff/:id/adjustments",
+  requireEntitlement("CMS"),
+  requirePermission("payroll.manage"),
+  asyncHandler(addStaffAdjustmentController),
+);
+campusRouter.post(
+  "/hr/payroll",
+  requireEntitlement("CMS"),
+  requirePermission("payroll.manage"),
+  asyncHandler(generatePayrollController),
+);
+campusRouter.put(
+  "/hr/payroll/:id/pay",
+  requireEntitlement("CMS"),
+  requirePermission("payroll.manage"),
+  asyncHandler(payPayrollController),
+);
+campusRouter.post(
+  "/hr/ratings",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(addTeacherRatingController),
+);
+
+campusRouter.get(
+  "/documents/templates",
+  requirePermission("documents.view"),
+  asyncHandler(listDocumentTemplatesController),
+);
+campusRouter.post(
+  "/documents/templates",
+  requirePermission("documents.manage"),
+  asyncHandler(createDocumentTemplateController),
+);
+campusRouter.put(
+  "/documents/templates/:id",
+  requirePermission("documents.manage"),
+  asyncHandler(updateDocumentTemplateController),
+);
+campusRouter.get(
+  "/documents/generated",
+  requirePermission("documents.view"),
+  asyncHandler(listGeneratedDocumentsController),
+);
+campusRouter.get(
+  "/documents/generated/:id",
+  requirePermission("documents.view"),
+  asyncHandler(getGeneratedDocumentController),
+);
+campusRouter.post(
+  "/documents/generated",
+  requirePermission("documents.generate"),
+  asyncHandler(generateDocumentController),
+);
+
+campusRouter.get(
+  "/reports",
+  requirePermission("reports.view"),
+  asyncHandler(getReportHubController),
+);
+campusRouter.get(
+  "/reports/:module",
+  requirePermission("reports.view"),
+  asyncHandler(runModuleReportController),
+);
+
+campusRouter.get(
+  "/timetable/setup",
+  requirePermission("timetable.view"),
+  asyncHandler(getTimetableSetupController),
+);
+campusRouter.post(
+  "/timetable/entries",
+  requirePermission("timetable.manage"),
+  asyncHandler(createTimetableEntryController),
+);
+campusRouter.put(
+  "/timetable/entries/:id",
+  requirePermission("timetable.manage"),
+  asyncHandler(updateTimetableEntryController),
+);
+campusRouter.delete(
+  "/timetable/entries/:id",
+  requirePermission("timetable.manage"),
+  asyncHandler(deleteTimetableEntryController),
+);
+campusRouter.get(
+  "/timetable/reports/free-periods",
+  requirePermission("timetable.manage"),
+  asyncHandler(getFreePeriodReportController),
+);
+
+campusRouter.get(
+  "/homework/setup",
+  requirePermission("homework.view"),
+  asyncHandler(getHomeworkSetupController),
+);
+campusRouter.post(
+  "/homework",
+  requirePermission("homework.manage"),
+  asyncHandler(createHomeworkController),
+);
+campusRouter.put(
+  "/homework/:id",
+  requirePermission("homework.manage"),
+  asyncHandler(updateHomeworkController),
+);
+campusRouter.get(
+  "/homework/:id/submissions",
+  requirePermission("homework.evaluate"),
+  asyncHandler(getHomeworkSubmissionsController),
+);
+campusRouter.post(
+  "/homework/:id/submissions",
+  requirePermission("homework.submit"),
+  asyncHandler(submitHomeworkController),
+);
+campusRouter.put(
+  "/homework/submissions/:id/evaluate",
+  requirePermission("homework.evaluate"),
+  asyncHandler(evaluateHomeworkSubmissionController),
+);
+campusRouter.get(
+  "/homework-reports",
+  requirePermission("homework.evaluate"),
+  asyncHandler(getHomeworkReportController),
+);
+
+campusRouter.get(
+  "/erp/setup",
+  requireEntitlement("CMS"),
+  requirePermission("erp.view"),
+  asyncHandler(getErpSetupController),
+);
+campusRouter.put(
+  "/erp/integrations/:category",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(updateIntegrationController),
+);
+campusRouter.post(
+  "/erp/payment-methods",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(createPaymentMethodController),
+);
+campusRouter.put(
+  "/erp/payment-methods/:id",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(updatePaymentMethodController),
+);
+campusRouter.delete(
+  "/erp/payment-methods/:id",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(deletePaymentMethodController),
+);
+campusRouter.put(
+  "/erp/modules/:key",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(upsertModuleController),
+);
+campusRouter.put(
+  "/erp/languages",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(upsertLanguageController),
+);
+campusRouter.post(
+  "/erp/custom-fields",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(createCustomFieldController),
+);
+campusRouter.put(
+  "/erp/custom-fields/:id",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(updateCustomFieldController),
+);
+campusRouter.delete(
+  "/erp/custom-fields/:id",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(deleteCustomFieldController),
+);
+campusRouter.put(
+  "/erp/system-fields/:key",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(upsertSystemFieldController),
+);
+campusRouter.put(
+  "/erp/shortcuts/:key",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(upsertShortcutController),
+);
+campusRouter.put(
+  "/erp/profile-rights/:key",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(upsertProfileRightController),
+);
+campusRouter.post(
+  "/erp/holidays",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(createHolidayController),
+);
+campusRouter.delete(
+  "/erp/holidays/:id",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(deleteHolidayController),
+);
+campusRouter.post(
+  "/erp/document-folders",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(createDocumentFolderController),
+);
+campusRouter.post(
+  "/erp/student-documents",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(createStudentDocumentController),
+);
+campusRouter.delete(
+  "/erp/student-documents/:id",
+  requireEntitlement("CMS"),
+  requirePermission("erp.manage"),
+  asyncHandler(deleteStudentDocumentController),
+);
+campusRouter.post(
+  "/erp/backups",
+  requireEntitlement("CMS"),
+  requirePermission("erp.backup"),
+  asyncHandler(createConfigurationBackupController),
+);
+campusRouter.post(
+  "/erp/backups/:id/restore",
+  requireEntitlement("CMS"),
+  requirePermission("erp.backup"),
+  asyncHandler(restoreConfigurationBackupController),
+);
+
+export { campusRouter };
