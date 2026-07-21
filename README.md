@@ -2,6 +2,8 @@
 
 Express + Prisma + PostgreSQL API for the multi-tenant CMS + LMS platform.
 
+> **Continuing in Cursor?** Read [`PROJECT_CONTEXT.md`](./PROJECT_CONTEXT.md) first.
+
 ## Setup (local PostgreSQL)
 
 ```powershell
