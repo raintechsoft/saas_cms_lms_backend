@@ -1,20 +1,21 @@
 services:
-  mysql:
-    image: mysql:8.4
-    container_name: saas-cms-lms-mysql
+  postgres:
+    image: postgres:16-alpine
+    container_name: saas-cms-lms-postgres
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: saas-cms-lms-db
-      MYSQL_ROOT_PASSWORD: password
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: saas_cms_lms
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-      - saas_cms_lms_mysql:/var/lib/mysql
+      - saas_cms_lms_postgres:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-ppassword"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d saas_cms_lms"]
       interval: 5s
       timeout: 5s
       retries: 20
 
 volumes:
-  saas_cms_lms_mysql:
+  saas_cms_lms_postgres:
