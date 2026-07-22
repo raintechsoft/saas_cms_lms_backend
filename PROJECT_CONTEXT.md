@@ -91,13 +91,14 @@ Password for all: `ChangeMe123!`
 - Split repos for Raintech GitHub
 - Migrated DB from MySQL → PostgreSQL
 
-## Remaining / later
+## Integrations roadmap (do in order)
 
-- S3 for uploads (production)
-- Real SMS / payment gateways
-- Deeper LMS (live class, course content)
-- Staging deploy + team shared cloud Postgres (optional)
-- Docker optional (local Postgres install works fine)
+1. **SMTP email (OTP + password reset)** — configure `.env` SMTP_* then `npm run mail:verify`
+2. **S3 / cloud uploads** — replace local `uploads/`
+3. **Payment gateway execute + webhook**
+4. **SMS provider** (if product needs it)
+5. Deeper LMS (live class, course content)
+6. Staging deploy + shared cloud Postgres (optional)
 
 ## Team workflow
 

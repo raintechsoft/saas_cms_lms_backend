@@ -11,7 +11,12 @@ import {
 } from "../../lib/auth-codes.js";
 import { AppError } from "../../lib/errors.js";
 import { verifyGoogleIdToken, isGoogleAuthConfigured } from "../../lib/google-auth.js";
-import { isMailConfigured, sendMail } from "../../lib/mail.js";
+import {
+  isMailConfigured,
+  otpEmailHtml,
+  resetPasswordEmailHtml,
+  sendMail,
+} from "../../lib/mail.js";
 import { prisma } from "../../lib/prisma.js";
 import type { AuthContext } from "../../types/express.js";
 
@@ -193,16 +198,22 @@ export async function requestLoginOtp(input: TenantScopedInput) {
     ttlMs: AUTH_CODE_TTL.OTP,
   });
 
+  const workspaceName = user.tenant?.name ?? "SaaS CMS LMS";
+  const text = [
+    `Hello ${user.firstName},`,
+    "",
+    `Your one-time sign-in code for ${workspaceName} is: ${code}`,
+    "",
+    "This code expires in 10 minutes. If you did not request it, you can ignore this email.",
+    "",
+    "SaaS CMS LMS",
+  ].join("\n");
+
   await sendMail({
     to: user.email,
-    subject: "Your SaaS CMS LMS sign-in code",
-    text: [
-      `Hello ${user.firstName},`,
-      "",
-      `Your one-time sign-in code is: ${code}`,
-      "",
-      "This code expires in 10 minutes. If you did not request it, you can ignore this email.",
-    ].join("\n"),
+    subject: `${code} is your ${workspaceName} sign-in code`,
+    text,
+    html: otpEmailHtml({ firstName: user.firstName, code, workspaceName }),
   });
 
   const response: { message: string; devCode?: string } = { message: genericMessage };
@@ -255,17 +266,23 @@ export async function forgotPassword(input: TenantScopedInput) {
   }
   const resetUrl = `${env.WEB_ORIGIN}/reset-password?${params.toString()}`;
 
+  const workspaceName = user.tenant?.name ?? "SaaS CMS LMS";
+  const text = [
+    `Hello ${user.firstName},`,
+    "",
+    `We received a request to reset your password for ${workspaceName}.`,
+    `Open this link to choose a new password: ${resetUrl}`,
+    "",
+    "This link expires in 1 hour. If you did not request a reset, you can ignore this email.",
+    "",
+    "SaaS CMS LMS",
+  ].join("\n");
+
   await sendMail({
     to: user.email,
-    subject: "Reset your SaaS CMS LMS password",
-    text: [
-      `Hello ${user.firstName},`,
-      "",
-      "We received a request to reset your password.",
-      `Open this link to choose a new password: ${resetUrl}`,
-      "",
-      "This link expires in 1 hour. If you did not request a reset, you can ignore this email.",
-    ].join("\n"),
+    subject: `Reset your ${workspaceName} password`,
+    text,
+    html: resetPasswordEmailHtml({ firstName: user.firstName, resetUrl, workspaceName }),
   });
 
   const response: { message: string; devResetUrl?: string } = { message: genericMessage };

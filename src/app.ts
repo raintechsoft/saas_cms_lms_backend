@@ -20,14 +20,6 @@ const allowedOrigins = new Set(
   ].filter(Boolean),
 );
 
-
-
-
-console.log('for testing')
-console.log('for testing')
-
-
-
 app.disable("x-powered-by");
 app.use(
   helmet({
