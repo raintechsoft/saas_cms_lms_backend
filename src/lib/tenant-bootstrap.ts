@@ -66,6 +66,68 @@ const DEFAULT_TENANT_ROLES = [
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
+function currentAcademicSessionBounds() {
+  const now = new Date();
+  const startYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  return {
+    name: `${startYear}-${startYear + 1}`,
+    startDate: new Date(`${startYear}-04-01T00:00:00.000Z`),
+    endDate: new Date(`${startYear + 1}-03-31T00:00:00.000Z`),
+  };
+}
+
+export async function bootstrapTenantWorkspace(tenantId: string, client: DbClient = prisma) {
+  const session = currentAcademicSessionBounds();
+  await client.tenantSetting.upsert({
+    where: { tenantId },
+    update: {},
+    create: {
+      tenantId,
+      email: null,
+      currency: "INR",
+      timezone: "Asia/Kolkata",
+      autoAdmissionNumber: true,
+      admissionPrefix: "ADM-",
+      nextAdmissionNumber: 1,
+      onlineAdmission: false,
+    },
+  });
+  await client.academicSession.upsert({
+    where: { tenantId_name: { tenantId, name: session.name } },
+    update: { isCurrent: true },
+    create: {
+      tenantId,
+      name: session.name,
+      startDate: session.startDate,
+      endDate: session.endDate,
+      isCurrent: true,
+    },
+  });
+}
+
+export async function ensureInstitutionAdminRole(tenantId: string, client: DbClient = prisma) {
+  const role = await client.role.upsert({
+    where: { tenantId_code: { tenantId, code: "INSTITUTION_ADMIN" } },
+    update: { name: "Institution Admin" },
+    create: {
+      tenantId,
+      code: "INSTITUTION_ADMIN",
+      name: "Institution Admin",
+      isSystem: true,
+    },
+  });
+  const permissions = await client.permission.findMany({
+    where: { key: { notIn: ["platform.manage", "tenants.manage"] } },
+  });
+  await client.rolePermission.deleteMany({ where: { roleId: role.id } });
+  if (permissions.length) {
+    await client.rolePermission.createMany({
+      data: permissions.map((permission) => ({ roleId: role.id, permissionId: permission.id })),
+    });
+  }
+  return role;
+}
+
 export async function ensureTenantRoles(tenantId: string, client: DbClient = prisma) {
   const permissions = await client.permission.findMany({
     select: { id: true, key: true },

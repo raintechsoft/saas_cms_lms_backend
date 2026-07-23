@@ -9,7 +9,7 @@ import {
 } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
-import { ensureTenantRoles } from "../../lib/tenant-bootstrap.js";
+import { ensureTenantRoles, bootstrapTenantWorkspace, ensureInstitutionAdminRole } from "../../lib/tenant-bootstrap.js";
 import { normalizeProductMode } from "../tenants/tenant.service.js";
 
 const PASSWORD_ROUNDS = 12;
@@ -198,7 +198,7 @@ interface CreateTenantInput {
   distributionModel?: DistributionModel;
   resellerId?: string | null;
   branding?: JsonObject;
-  adminEmail?: string;
+  adminEmail: string;
   adminPassword?: string;
   adminFirstName?: string;
   adminLastName?: string;
@@ -231,39 +231,25 @@ export async function createTenant(input: CreateTenantInput) {
     });
 
     await ensureTenantRoles(tenant.id, tx);
+    await bootstrapTenantWorkspace(tenant.id, tx);
 
     let admin: { email: string; temporaryPassword?: string } | null = null;
-    if (input.adminEmail) {
-      const email = input.adminEmail.trim().toLowerCase();
-      const role = await tx.role.create({
-        data: {
-          tenantId: tenant.id,
-          code: "INSTITUTION_ADMIN",
-          name: "Institution Admin",
-          isSystem: true,
-        },
-      });
-      const permissions = await tx.permission.findMany({
-        where: { key: { notIn: ["platform.manage", "tenants.manage"] } },
-      });
-      await tx.rolePermission.createMany({
-        data: permissions.map((permission) => ({ roleId: role.id, permissionId: permission.id })),
-      });
-      const password = input.adminPassword?.trim() || "ChangeMe123!";
-      const user = await tx.user.create({
-        data: {
-          tenantId: tenant.id,
-          email,
-          passwordHash: await bcrypt.hash(password, PASSWORD_ROUNDS),
-          firstName: input.adminFirstName?.trim() || "Institution",
-          lastName: input.adminLastName?.trim() || "Administrator",
-        },
-      });
-      await tx.userRole.create({
-        data: { userId: user.id, roleId: role.id, tenantId: tenant.id },
-      });
-      admin = { email, temporaryPassword: input.adminPassword ? undefined : password };
-    }
+    const email = input.adminEmail.trim().toLowerCase();
+    const role = await ensureInstitutionAdminRole(tenant.id, tx);
+    const password = input.adminPassword?.trim() || "ChangeMe123!";
+    const user = await tx.user.create({
+      data: {
+        tenantId: tenant.id,
+        email,
+        passwordHash: await bcrypt.hash(password, PASSWORD_ROUNDS),
+        firstName: input.adminFirstName?.trim() || "Institution",
+        lastName: input.adminLastName?.trim() || "Administrator",
+      },
+    });
+    await tx.userRole.create({
+      data: { userId: user.id, roleId: role.id, tenantId: tenant.id },
+    });
+    admin = { email, temporaryPassword: input.adminPassword ? undefined : password };
 
     return { tenant, admin };
   });

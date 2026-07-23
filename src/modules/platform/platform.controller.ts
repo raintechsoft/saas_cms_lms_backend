@@ -37,7 +37,7 @@ const createTenantBody = z.object({
   distributionModel: z.nativeEnum(DistributionModel).optional(),
   resellerId: z.string().min(1).nullable().optional(),
   branding: brandingSchema.optional(),
-  adminEmail: z.string().email().max(200).optional(),
+  adminEmail: z.string().email().max(200),
   adminPassword: z.string().min(8).max(200).optional(),
   adminFirstName: z.string().trim().max(80).optional(),
   adminLastName: z.string().trim().max(80).optional(),
