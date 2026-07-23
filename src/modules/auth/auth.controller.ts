@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
-import { publicUploadPath } from "../../lib/uploads.js";
+import { persistAvatarUpload } from "../../lib/uploads.js";
 import {
   forgotPassword,
   getAuthPublicConfig,
@@ -76,7 +76,7 @@ export async function uploadAvatarController(req: Request, res: Response) {
   if (!file) {
     throw new AppError(400, "Image file is required", "FILE_REQUIRED");
   }
-  const avatarUrl = publicUploadPath(file.filename);
+  const avatarUrl = await persistAvatarUpload(file);
   const data = await updateOwnAvatar(req.auth!.userId, avatarUrl);
   res.json({ data });
 }

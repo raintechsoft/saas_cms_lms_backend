@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { NoticeAudience } from "@prisma/client";
-import { publicUploadPath } from "../../lib/uploads.js";
+import { persistAvatarUpload } from "../../lib/uploads.js";
 import { getPortalOverview } from "./portal.service.js";
 import {
   createPortalLeave,
@@ -183,7 +183,7 @@ export async function uploadPortalStudentPhotoController(req: Request, res: Resp
     res.status(400).json({ error: { code: "FILE_REQUIRED", message: "Image file is required" } });
     return;
   }
-  const photoUrl = publicUploadPath(file.filename);
+  const photoUrl = await persistAvatarUpload(file);
   res.json({
     data: await updatePortalStudentProfile(
       req.auth!.tenantId!,

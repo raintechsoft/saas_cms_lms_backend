@@ -93,8 +93,8 @@ Password for all: `ChangeMe123!`
 
 ## Integrations roadmap (do in order)
 
-1. **SMTP email (OTP + password reset)** — configure `.env` SMTP_* then `npm run mail:verify`
-2. **S3 / cloud uploads** — replace local `uploads/`
+1. **SMTP email (OTP + password reset)** — done when SMTP_* configured + `npm run mail:verify`
+2. **S3 / cloud uploads** — set `STORAGE_DRIVER=s3` + S3_* then `npm run storage:verify` (default remains `local`)
 3. **Payment gateway execute + webhook**
 4. **SMS provider** (if product needs it)
 5. Deeper LMS (live class, course content)

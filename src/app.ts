@@ -5,7 +5,7 @@ import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { env } from "./config/env.js";
 import { AppError } from "./lib/errors.js";
-import { UPLOAD_ROOT } from "./lib/uploads.js";
+import { getStorageDriver, UPLOAD_ROOT } from "./lib/uploads.js";
 import { apiRouter } from "./routes/index.js";
 
 export const app = express();
@@ -41,7 +41,9 @@ app.use(
   }),
 );
 app.use(express.json({ limit: "2mb" }));
-app.use("/uploads", express.static(UPLOAD_ROOT));
+if (getStorageDriver() === "local") {
+  app.use("/uploads", express.static(UPLOAD_ROOT));
+}
 
 app.use("/api/v1", apiRouter);
 
