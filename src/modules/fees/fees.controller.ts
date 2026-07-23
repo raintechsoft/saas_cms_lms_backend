@@ -14,13 +14,23 @@ import {
   createFeeMaster,
   createFeeType,
   createReceiptBook,
+  deleteFeeDiscount,
+  deleteFeeGroup,
+  deleteFeeMaster,
+  deleteFeeType,
+  deleteReceiptBook,
   getFeeSetup,
   getFeeSummary,
   listStudentFees,
   revertPayment,
   searchPayments,
   updateAssignmentDiscount,
+  updateFeeDiscount,
+  updateFeeGroup,
+  updateFeeMaster,
   updateFeeReminder,
+  updateFeeType,
+  updateReceiptBook,
 } from "./fees.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
@@ -29,20 +39,36 @@ const feeTypeBody = z.object({
   code: z.string().trim().max(30).nullable().optional(),
   description: z.string().trim().max(1000).nullable().optional(),
 });
+const feeTypeUpdateBody = feeTypeBody.partial().extend({
+  isActive: z.boolean().optional(),
+});
 const feeGroupBody = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(1000).nullable().optional(),
   feeTypeIds: z.array(z.string().min(1)).min(1),
+});
+const feeGroupUpdateBody = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
+  feeTypeIds: z.array(z.string().min(1)).min(1).optional(),
 });
 const discountBody = z.object({
   name: z.string().trim().min(1).max(100),
   type: z.nativeEnum(DiscountType),
   value: z.coerce.number().positive(),
 });
+const discountUpdateBody = discountBody.partial().extend({
+  isActive: z.boolean().optional(),
+});
 const receiptBookBody = z.object({
   name: z.string().trim().min(1).max(100),
   prefix: z.string().trim().min(1).max(20),
   isDefault: z.boolean().default(false),
+});
+const receiptBookUpdateBody = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  prefix: z.string().trim().min(1).max(20).optional(),
+  isDefault: z.boolean().optional(),
 });
 const feeMasterBody = z.object({
   academicSessionId: z.string().min(1),
@@ -56,6 +82,7 @@ const feeMasterBody = z.object({
   graceDays: z.coerce.number().int().min(0).max(365).default(0),
   isCustom: z.boolean().default(false),
 });
+const feeMasterUpdateBody = feeMasterBody.partial();
 const assignmentBody = z.object({
   enrollmentIds: z.array(z.string().min(1)).min(1).optional(),
 });
@@ -106,10 +133,40 @@ export async function createFeeTypeController(req: Request, res: Response) {
   });
 }
 
+export async function updateFeeTypeController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateFeeType(req.auth!.tenantId!, id, feeTypeUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteFeeTypeController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const data = await deleteFeeType(req.auth!.tenantId!, id);
+  if ("deleted" in data && data.deleted) {
+    res.status(204).send();
+    return;
+  }
+  res.json({ data });
+}
+
 export async function createFeeGroupController(req: Request, res: Response) {
   res.status(201).json({
     data: await createFeeGroup(req.auth!.tenantId!, feeGroupBody.parse(req.body)),
   });
+}
+
+export async function updateFeeGroupController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateFeeGroup(req.auth!.tenantId!, id, feeGroupUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteFeeGroupController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteFeeGroup(req.auth!.tenantId!, id);
+  res.status(204).send();
 }
 
 export async function createFeeDiscountController(req: Request, res: Response) {
@@ -118,16 +175,59 @@ export async function createFeeDiscountController(req: Request, res: Response) {
   });
 }
 
+export async function updateFeeDiscountController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateFeeDiscount(req.auth!.tenantId!, id, discountUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteFeeDiscountController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const data = await deleteFeeDiscount(req.auth!.tenantId!, id);
+  if ("deleted" in data && data.deleted) {
+    res.status(204).send();
+    return;
+  }
+  res.json({ data });
+}
+
 export async function createReceiptBookController(req: Request, res: Response) {
   res.status(201).json({
     data: await createReceiptBook(req.auth!.tenantId!, receiptBookBody.parse(req.body)),
   });
 }
 
+export async function updateReceiptBookController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateReceiptBook(req.auth!.tenantId!, id, receiptBookUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteReceiptBookController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteReceiptBook(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
 export async function createFeeMasterController(req: Request, res: Response) {
   res.status(201).json({
     data: await createFeeMaster(req.auth!.tenantId!, feeMasterBody.parse(req.body)),
   });
+}
+
+export async function updateFeeMasterController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateFeeMaster(req.auth!.tenantId!, id, feeMasterUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteFeeMasterController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteFeeMaster(req.auth!.tenantId!, id);
+  res.status(204).send();
 }
 
 export async function assignFeeMasterController(req: Request, res: Response) {

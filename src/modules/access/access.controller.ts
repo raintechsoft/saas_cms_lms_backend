@@ -5,6 +5,8 @@ import {
   createRole,
   createUser,
   deleteRole,
+  deleteUser,
+  getUser,
   listPermissions,
   listRoles,
   listUsers,
@@ -26,6 +28,7 @@ const createUserBody = z.object({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
   password: z.string().min(8).max(128),
+  phone: z.string().trim().max(30).nullable().optional(),
   roleIds: z.array(z.string().min(1)).min(1),
 });
 const updateUserBody = z.object({
@@ -33,6 +36,7 @@ const updateUserBody = z.object({
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().min(1).max(100).optional(),
   password: z.string().min(8).max(128).optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
   status: z.nativeEnum(UserStatus).optional(),
   roleIds: z.array(z.string().min(1)).min(1).optional(),
 }).strict();
@@ -67,6 +71,11 @@ export async function listUsersController(req: Request, res: Response) {
   res.json({ data: await listUsers(req.auth!.tenantId!) });
 }
 
+export async function getUserController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getUser(req.auth!.tenantId!, id) });
+}
+
 export async function createUserController(req: Request, res: Response) {
   const data = await createUser(req.auth!.tenantId!, createUserBody.parse(req.body));
   res.status(201).json({ data });
@@ -82,4 +91,14 @@ export async function updateUserController(req: Request, res: Response) {
       updateUserBody.parse(req.body),
     ),
   });
+}
+
+export async function deleteUserController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const result = await deleteUser(req.auth!.tenantId!, req.auth!.userId, id);
+  if (result.mode === "deleted") {
+    res.status(204).send();
+    return;
+  }
+  res.json({ data: result.user, meta: { mode: result.mode } });
 }

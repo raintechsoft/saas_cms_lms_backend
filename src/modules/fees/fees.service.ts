@@ -261,6 +261,291 @@ export async function createFeeMaster(tenantId: string, input: FeeMasterInput) {
   return prisma.feeMaster.create({ data: { tenantId, ...input } });
 }
 
+async function requireFeeType(tenantId: string, id: string) {
+  const row = await prisma.feeType.findFirst({ where: tenantScope(tenantId, { id }) });
+  if (!row) throw new AppError(404, "Fee type not found", "FEE_TYPE_NOT_FOUND");
+  return row;
+}
+
+async function requireFeeGroup(tenantId: string, id: string) {
+  const row = await prisma.feeGroup.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: { items: { include: { feeType: true } }, _count: { select: { feeMasters: true } } },
+  });
+  if (!row) throw new AppError(404, "Fee group not found", "FEE_GROUP_NOT_FOUND");
+  return row;
+}
+
+async function requireFeeDiscount(tenantId: string, id: string) {
+  const row = await prisma.feeDiscount.findFirst({ where: tenantScope(tenantId, { id }) });
+  if (!row) throw new AppError(404, "Fee discount not found", "FEE_DISCOUNT_NOT_FOUND");
+  return row;
+}
+
+async function requireReceiptBook(tenantId: string, id: string) {
+  const row = await prisma.feeReceiptBook.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: { _count: { select: { payments: true } } },
+  });
+  if (!row) throw new AppError(404, "Receipt book not found", "RECEIPT_BOOK_NOT_FOUND");
+  return row;
+}
+
+async function requireFeeMaster(tenantId: string, id: string) {
+  const row = await prisma.feeMaster.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: {
+      feeType: true,
+      feeGroup: true,
+      classSection: { include: { academicClass: true, section: true } },
+      _count: { select: { assignments: true } },
+    },
+  });
+  if (!row) throw new AppError(404, "Fee master not found", "FEE_MASTER_NOT_FOUND");
+  return row;
+}
+
+export async function updateFeeType(
+  tenantId: string,
+  id: string,
+  input: {
+    name?: string;
+    code?: string | null;
+    description?: string | null;
+    isActive?: boolean;
+  },
+) {
+  await requireFeeType(tenantId, id);
+  return prisma.feeType.update({
+    where: { id },
+    data: {
+      name: input.name,
+      code: input.code === undefined ? undefined : input.code,
+      description: input.description === undefined ? undefined : input.description,
+      isActive: input.isActive,
+    },
+  });
+}
+
+export async function deleteFeeType(tenantId: string, id: string) {
+  const row = await prisma.feeType.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: {
+      _count: { select: { feeMasters: true, groupItems: true } },
+    },
+  });
+  if (!row) throw new AppError(404, "Fee type not found", "FEE_TYPE_NOT_FOUND");
+  if (row._count.feeMasters > 0 || row._count.groupItems > 0) {
+    // Soft-disable when referenced so history stays intact.
+    return prisma.feeType.update({
+      where: { id },
+      data: { isActive: false },
+    });
+  }
+  await prisma.feeType.delete({ where: { id } });
+  return { id, deleted: true as const };
+}
+
+export async function updateFeeGroup(
+  tenantId: string,
+  id: string,
+  input: { name?: string; description?: string | null; feeTypeIds?: string[] },
+) {
+  await requireFeeGroup(tenantId, id);
+  if (input.feeTypeIds) {
+    const count = await prisma.feeType.count({
+      where: tenantScope(tenantId, { id: { in: input.feeTypeIds } }),
+    });
+    if (count !== new Set(input.feeTypeIds).size) {
+      throw new AppError(400, "One or more fee types are invalid", "INVALID_FEE_TYPE");
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    if (input.feeTypeIds) {
+      await tx.feeGroupItem.deleteMany({ where: { feeGroupId: id } });
+      await tx.feeGroupItem.createMany({
+        data: [...new Set(input.feeTypeIds)].map((feeTypeId) => ({ feeGroupId: id, feeTypeId })),
+      });
+    }
+    return tx.feeGroup.update({
+      where: { id },
+      data: {
+        name: input.name,
+        description: input.description === undefined ? undefined : input.description,
+      },
+      include: { items: { include: { feeType: true } } },
+    });
+  });
+}
+
+export async function deleteFeeGroup(tenantId: string, id: string) {
+  const row = await requireFeeGroup(tenantId, id);
+  if (row._count.feeMasters > 0) {
+    throw new AppError(409, "Fee group is used by fee masters", "FEE_GROUP_IN_USE");
+  }
+  await prisma.feeGroup.delete({ where: { id } });
+}
+
+export async function updateFeeDiscount(
+  tenantId: string,
+  id: string,
+  input: { name?: string; type?: DiscountType; value?: number; isActive?: boolean },
+) {
+  await requireFeeDiscount(tenantId, id);
+  const type = input.type;
+  const value = input.value;
+  if (type === DiscountType.PERCENTAGE && value !== undefined && value > 100) {
+    throw new AppError(400, "Percentage discount cannot exceed 100", "INVALID_DISCOUNT");
+  }
+  return prisma.feeDiscount.update({
+    where: { id },
+    data: {
+      name: input.name,
+      type,
+      value,
+      isActive: input.isActive,
+    },
+  });
+}
+
+export async function deleteFeeDiscount(tenantId: string, id: string) {
+  const row = await prisma.feeDiscount.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: { _count: { select: { assignments: true } } },
+  });
+  if (!row) throw new AppError(404, "Fee discount not found", "FEE_DISCOUNT_NOT_FOUND");
+  if (row._count.assignments > 0) {
+    return prisma.feeDiscount.update({
+      where: { id },
+      data: { isActive: false },
+    });
+  }
+  await prisma.feeDiscount.delete({ where: { id } });
+  return { id, deleted: true as const };
+}
+
+export async function updateReceiptBook(
+  tenantId: string,
+  id: string,
+  input: { name?: string; prefix?: string; isDefault?: boolean },
+) {
+  await requireReceiptBook(tenantId, id);
+  return prisma.$transaction(async (tx) => {
+    if (input.isDefault) {
+      await tx.feeReceiptBook.updateMany({
+        where: { tenantId, isDefault: true, NOT: { id } },
+        data: { isDefault: false },
+      });
+    }
+    return tx.feeReceiptBook.update({
+      where: { id },
+      data: {
+        name: input.name,
+        prefix: input.prefix,
+        isDefault: input.isDefault,
+      },
+    });
+  });
+}
+
+export async function deleteReceiptBook(tenantId: string, id: string) {
+  const row = await requireReceiptBook(tenantId, id);
+  if (row._count.payments > 0) {
+    throw new AppError(409, "Receipt book has payments and cannot be deleted", "RECEIPT_BOOK_IN_USE");
+  }
+  if (row.isDefault) {
+    throw new AppError(409, "Set another default receipt book before deleting this one", "DEFAULT_RECEIPT_BOOK");
+  }
+  await prisma.feeReceiptBook.delete({ where: { id } });
+}
+
+export async function updateFeeMaster(
+  tenantId: string,
+  id: string,
+  input: Partial<FeeMasterInput>,
+) {
+  const existing = await requireFeeMaster(tenantId, id);
+  const next = {
+    academicSessionId: input.academicSessionId ?? existing.academicSessionId,
+    classSectionId:
+      input.classSectionId !== undefined ? input.classSectionId : existing.classSectionId,
+    feeGroupId: input.feeGroupId ?? existing.feeGroupId,
+    feeTypeId: input.feeTypeId ?? existing.feeTypeId,
+    amount: input.amount ?? Number(existing.amount),
+    dueDate: input.dueDate ?? existing.dueDate,
+    fineType: input.fineType ?? existing.fineType,
+    fineValue: input.fineValue ?? Number(existing.fineValue),
+    graceDays: input.graceDays ?? existing.graceDays,
+    isCustom: input.isCustom ?? existing.isCustom,
+  };
+
+  if (next.fineType === FeeFineType.PERCENTAGE && next.fineValue > 100) {
+    throw new AppError(400, "Percentage fine cannot exceed 100", "INVALID_FINE");
+  }
+
+  const [session, group, type, classSection, groupItem] = await Promise.all([
+    prisma.academicSession.findFirst({
+      where: tenantScope(tenantId, { id: next.academicSessionId }),
+    }),
+    prisma.feeGroup.findFirst({ where: tenantScope(tenantId, { id: next.feeGroupId }) }),
+    prisma.feeType.findFirst({ where: tenantScope(tenantId, { id: next.feeTypeId }) }),
+    next.classSectionId
+      ? prisma.classSection.findFirst({
+          where: tenantScope(tenantId, {
+            id: next.classSectionId,
+            academicSessionId: next.academicSessionId,
+          }),
+        })
+      : Promise.resolve(true),
+    prisma.feeGroupItem.findUnique({
+      where: {
+        feeGroupId_feeTypeId: {
+          feeGroupId: next.feeGroupId,
+          feeTypeId: next.feeTypeId,
+        },
+      },
+    }),
+  ]);
+  if (!session || !group || !type || !classSection || !groupItem) {
+    throw new AppError(400, "Fee master references are invalid", "INVALID_FEE_MASTER");
+  }
+  if (!next.classSectionId && !next.isCustom) {
+    throw new AppError(400, "A class section is required", "CLASS_SECTION_REQUIRED");
+  }
+
+  return prisma.feeMaster.update({
+    where: { id },
+    data: next,
+    include: {
+      feeType: true,
+      feeGroup: true,
+      classSection: { include: { academicClass: true, section: true } },
+      _count: { select: { assignments: true } },
+    },
+  });
+}
+
+export async function deleteFeeMaster(tenantId: string, id: string) {
+  const row = await requireFeeMaster(tenantId, id);
+  const paidAssignments = await prisma.studentFeeAssignment.count({
+    where: tenantScope(tenantId, {
+      feeMasterId: id,
+      paymentItems: { some: {} },
+    }),
+  });
+  if (paidAssignments > 0) {
+    throw new AppError(409, "Fee master has collected payments and cannot be deleted", "FEE_MASTER_IN_USE");
+  }
+  // Assignments without payments are removed via cascade from FeeMaster.
+  if (row._count.assignments > 0) {
+    await prisma.studentFeeAssignment.deleteMany({
+      where: tenantScope(tenantId, { feeMasterId: id, paymentItems: { none: {} } }),
+    });
+  }
+  await prisma.feeMaster.delete({ where: { id } });
+}
+
 export async function assignFeeMaster(
   tenantId: string,
   masterId: string,
