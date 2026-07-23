@@ -17,6 +17,7 @@ interface UserInput {
   firstName: string;
   lastName: string;
   password: string;
+  phone?: string | null;
   roleIds: string[];
 }
 
@@ -25,6 +26,7 @@ interface UpdateUserInput {
   firstName?: string;
   lastName?: string;
   password?: string;
+  phone?: string | null;
   status?: UserStatus;
   roleIds?: string[];
 }
@@ -136,6 +138,7 @@ export function listUsers(tenantId: string) {
       email: true,
       firstName: true,
       lastName: true,
+      phone: true,
       status: true,
       createdAt: true,
       updatedAt: true,
@@ -143,6 +146,27 @@ export function listUsers(tenantId: string) {
     },
     orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
   });
+}
+
+export async function getUser(tenantId: string, userId: string) {
+  const user = await prisma.user.findFirst({
+    where: tenantScope(tenantId, { id: userId }),
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      roles: userInclude.roles,
+      studentProfile: { select: { id: true } },
+      staffProfile: { select: { id: true } },
+    },
+  });
+  if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
+  return user;
 }
 
 export async function createUser(tenantId: string, input: UserInput) {
@@ -157,6 +181,7 @@ export async function createUser(tenantId: string, input: UserInput) {
       email,
       firstName: input.firstName,
       lastName: input.lastName,
+      phone: input.phone?.trim() || null,
       passwordHash: await bcrypt.hash(input.password, 12),
       roles: {
         create: [...new Set(input.roleIds)].map((roleId) => ({ roleId, tenantId })),
@@ -167,6 +192,7 @@ export async function createUser(tenantId: string, input: UserInput) {
       email: true,
       firstName: true,
       lastName: true,
+      phone: true,
       status: true,
       roles: userInclude.roles,
     },
@@ -204,6 +230,7 @@ export async function updateUser(
         email,
         firstName: input.firstName,
         lastName: input.lastName,
+        phone: input.phone === undefined ? undefined : input.phone?.trim() || null,
         status: input.status,
         passwordHash: input.password ? await bcrypt.hash(input.password, 12) : undefined,
         roles: input.roleIds
@@ -217,9 +244,63 @@ export async function updateUser(
         email: true,
         firstName: true,
         lastName: true,
+        phone: true,
         status: true,
         roles: userInclude.roles,
       },
     });
   });
+}
+
+/** Soft-delete: disable the account. Hard delete only when the user has no linked profiles/history. */
+export async function deleteUser(tenantId: string, actorUserId: string, userId: string) {
+  if (userId === actorUserId) {
+    throw new AppError(409, "You cannot delete your own account", "SELF_DELETE");
+  }
+
+  const user = await prisma.user.findFirst({
+    where: tenantScope(tenantId, { id: userId }),
+    include: {
+      studentProfile: { select: { id: true } },
+      staffProfile: { select: { id: true } },
+      _count: {
+        select: {
+          feePaymentsCreated: true,
+          attendanceMarked: true,
+          homeworkCreated: true,
+          auditLogs: true,
+        },
+      },
+    },
+  });
+  if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
+
+  const hasHistory =
+    Boolean(user.studentProfile) ||
+    Boolean(user.staffProfile) ||
+    user._count.feePaymentsCreated > 0 ||
+    user._count.attendanceMarked > 0 ||
+    user._count.homeworkCreated > 0 ||
+    user._count.auditLogs > 0;
+
+  if (hasHistory) {
+    const data = await prisma.user.update({
+      where: { id: userId },
+      data: { status: UserStatus.DISABLED },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        status: true,
+        roles: userInclude.roles,
+      },
+    });
+    return { mode: "disabled" as const, user: data };
+  }
+
+  await prisma.userRole.deleteMany({ where: { userId, tenantId } });
+  await prisma.user.delete({ where: { id: userId } });
+  return { mode: "deleted" as const, id: userId };
 }

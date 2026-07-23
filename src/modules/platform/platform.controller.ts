@@ -19,9 +19,11 @@ import {
   listPlatformUsers,
   listResellers,
   listTenants,
+  deletePlatformUser,
   setTenantStatus,
   setUserStatus,
   updatePlatformSettings,
+  updatePlatformUser,
   updateReseller,
   updateTenant,
 } from "./platform.service.js";
@@ -54,6 +56,16 @@ const updateTenantBody = z.object({
 
 const statusBody = z.object({ status: z.nativeEnum(TenantStatus) });
 const userStatusBody = z.object({ status: z.nativeEnum(UserStatus) });
+const updatePlatformUserBody = z
+  .object({
+    email: z.string().email().optional(),
+    firstName: z.string().trim().min(1).max(100).optional(),
+    lastName: z.string().trim().min(1).max(100).optional(),
+    phone: z.string().trim().max(30).nullable().optional(),
+    status: z.nativeEnum(UserStatus).optional(),
+    password: z.string().min(8).max(128).optional(),
+  })
+  .strict();
 const createResellerBody = z.object({
   name: z.string().trim().min(2).max(160),
   slug: z.string().trim().min(2).max(80).optional(),
@@ -151,6 +163,23 @@ export async function setUserStatusController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   const { status } = userStatusBody.parse(req.body);
   res.json({ data: await setUserStatus(id, status, req.auth!.userId) });
+}
+
+export async function updatePlatformUserController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updatePlatformUser(id, req.auth!.userId, updatePlatformUserBody.parse(req.body)),
+  });
+}
+
+export async function deletePlatformUserController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const result = await deletePlatformUser(id, req.auth!.userId);
+  if (result.mode === "deleted") {
+    res.status(204).send();
+    return;
+  }
+  res.json({ data: result.user, meta: { mode: result.mode } });
 }
 
 export async function getPlatformAuditController(req: Request, res: Response) {

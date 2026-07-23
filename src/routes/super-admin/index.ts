@@ -8,6 +8,7 @@ import {
   assignTenantsToResellerController,
   createResellerController,
   createTenantController,
+  deletePlatformUserController,
   getPlatformAuditController,
   getPlatformSettingsController,
   getPlatformStatsController,
@@ -19,6 +20,7 @@ import {
   setTenantStatusController,
   setUserStatusController,
   updatePlatformSettingsController,
+  updatePlatformUserController,
   updateResellerController,
   updateTenantController,
 } from "../../modules/platform/platform.controller.js";
@@ -40,5 +42,7 @@ platformRouter.get("/resellers/:id", asyncHandler(getResellerDetailController));
 platformRouter.put("/resellers/:id", asyncHandler(updateResellerController));
 platformRouter.put("/resellers/:id/tenants", asyncHandler(assignTenantsToResellerController));
 platformRouter.get("/users", asyncHandler(listPlatformUsersController));
+platformRouter.put("/users/:id", asyncHandler(updatePlatformUserController));
 platformRouter.put("/users/:id/status", asyncHandler(setUserStatusController));
+platformRouter.delete("/users/:id", asyncHandler(deletePlatformUserController));
 platformRouter.get("/audit", asyncHandler(getPlatformAuditController));

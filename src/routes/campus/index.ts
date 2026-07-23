@@ -12,6 +12,8 @@ import {
   createRoleController,
   createUserController,
   deleteRoleController,
+  deleteUserController,
+  getUserController,
   listPermissionsController,
   listRolesController,
   listUsersController,
@@ -68,13 +70,23 @@ import {
   createFeeMasterController,
   createFeeTypeController,
   createReceiptBookController,
+  deleteFeeDiscountController,
+  deleteFeeGroupController,
+  deleteFeeMasterController,
+  deleteFeeTypeController,
+  deleteReceiptBookController,
   getFeeSetupController,
   getFeeSummaryController,
   listStudentFeesController,
   revertPaymentController,
   searchPaymentsController,
   updateAssignmentDiscountController,
+  updateFeeDiscountController,
+  updateFeeGroupController,
+  updateFeeMasterController,
   updateFeeReminderController,
+  updateFeeTypeController,
+  updateReceiptBookController,
 } from "../../modules/fees/fees.controller.js";
 import {
   awardAttendancePointsController,
@@ -227,8 +239,10 @@ campusRouter.delete(
   asyncHandler(deleteRoleController),
 );
 campusRouter.get("/users", requirePermission("users.view"), asyncHandler(listUsersController));
+campusRouter.get("/users/:id", requirePermission("users.view"), asyncHandler(getUserController));
 campusRouter.post("/users", requirePermission("users.manage"), asyncHandler(createUserController));
 campusRouter.put("/users/:id", requirePermission("users.manage"), asyncHandler(updateUserController));
+campusRouter.delete("/users/:id", requirePermission("users.manage"), asyncHandler(deleteUserController));
 
 campusRouter.get(
   "/academics/setup",
@@ -384,11 +398,35 @@ campusRouter.post(
   requirePermission("fees.manage"),
   asyncHandler(createFeeTypeController),
 );
+campusRouter.put(
+  "/fees/types/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(updateFeeTypeController),
+);
+campusRouter.delete(
+  "/fees/types/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(deleteFeeTypeController),
+);
 campusRouter.post(
   "/fees/groups",
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(createFeeGroupController),
+);
+campusRouter.put(
+  "/fees/groups/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(updateFeeGroupController),
+);
+campusRouter.delete(
+  "/fees/groups/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(deleteFeeGroupController),
 );
 campusRouter.post(
   "/fees/discounts",
@@ -396,17 +434,53 @@ campusRouter.post(
   requirePermission("fees.manage"),
   asyncHandler(createFeeDiscountController),
 );
+campusRouter.put(
+  "/fees/discounts/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(updateFeeDiscountController),
+);
+campusRouter.delete(
+  "/fees/discounts/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(deleteFeeDiscountController),
+);
 campusRouter.post(
   "/fees/receipt-books",
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(createReceiptBookController),
 );
+campusRouter.put(
+  "/fees/receipt-books/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(updateReceiptBookController),
+);
+campusRouter.delete(
+  "/fees/receipt-books/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(deleteReceiptBookController),
+);
 campusRouter.post(
   "/fees/masters",
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(createFeeMasterController),
+);
+campusRouter.put(
+  "/fees/masters/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(updateFeeMasterController),
+);
+campusRouter.delete(
+  "/fees/masters/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(deleteFeeMasterController),
 );
 campusRouter.post(
   "/fees/masters/:id/assign",

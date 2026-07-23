@@ -389,6 +389,7 @@ export async function listPlatformUsers(query?: {
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
+    phone: user.phone,
     status: user.status,
     tenant: user.tenant,
     reseller: user.reseller,
@@ -403,7 +404,124 @@ export async function setUserStatus(userId: string, status: UserStatus, requeste
   }
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
-  return prisma.user.update({ where: { id: userId }, data: { status } });
+  return prisma.user.update({
+    where: { id: userId },
+    data: { status },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      status: true,
+    },
+  });
+}
+
+export async function updatePlatformUser(
+  userId: string,
+  requesterId: string,
+  input: {
+    email?: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string | null;
+    status?: UserStatus;
+    password?: string;
+  },
+) {
+  if (userId === requesterId && input.status === UserStatus.DISABLED) {
+    throw new AppError(400, "You cannot disable your own account", "SELF_STATUS_CHANGE");
+  }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
+
+  const email = input.email?.trim().toLowerCase();
+  if (email && email !== user.email) {
+    const exists = await prisma.user.findFirst({
+      where: {
+        email,
+        tenantId: user.tenantId,
+        NOT: { id: userId },
+      },
+    });
+    if (exists) throw new AppError(409, "Email already exists", "USER_EXISTS");
+  }
+
+  return prisma.user.update({
+    where: { id: userId },
+    data: {
+      email,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      phone: input.phone === undefined ? undefined : input.phone?.trim() || null,
+      status: input.status,
+      passwordHash: input.password
+        ? await bcrypt.hash(input.password, PASSWORD_ROUNDS)
+        : undefined,
+    },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      phone: true,
+      status: true,
+    },
+  });
+}
+
+/** Soft-disable when user has history; hard-delete when unused. */
+export async function deletePlatformUser(userId: string, requesterId: string) {
+  if (userId === requesterId) {
+    throw new AppError(400, "You cannot delete your own account", "SELF_DELETE");
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      studentProfile: { select: { id: true } },
+      staffProfile: { select: { id: true } },
+      _count: {
+        select: {
+          feePaymentsCreated: true,
+          attendanceMarked: true,
+          homeworkCreated: true,
+          auditLogs: true,
+        },
+      },
+    },
+  });
+  if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
+
+  const hasHistory =
+    Boolean(user.studentProfile) ||
+    Boolean(user.staffProfile) ||
+    user._count.feePaymentsCreated > 0 ||
+    user._count.attendanceMarked > 0 ||
+    user._count.homeworkCreated > 0 ||
+    user._count.auditLogs > 0;
+
+  if (hasHistory) {
+    const data = await prisma.user.update({
+      where: { id: userId },
+      data: { status: UserStatus.DISABLED },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        status: true,
+      },
+    });
+    return { mode: "disabled" as const, user: data };
+  }
+
+  await prisma.userRole.deleteMany({ where: { userId } });
+  await prisma.user.delete({ where: { id: userId } });
+  return { mode: "deleted" as const, id: userId };
 }
 
 export async function getPlatformAudit(query?: {
