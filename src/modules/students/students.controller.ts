@@ -1,4 +1,4 @@
-import { Gender, OnlineAdmissionStatus, StudentStatus } from "@prisma/client";
+import { AdmissionType, Gender, OnlineAdmissionStatus, StudentStatus } from "@prisma/client";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
@@ -44,11 +44,27 @@ const studentBody = z.object({
   permanentAddress: nullableText(1000),
   fatherName: nullableText(100),
   fatherPhone: nullableText(30),
+  fatherEmail: z.string().email().nullable().optional().or(z.literal("").transform(() => null)),
+  fatherOccupation: nullableText(100),
   motherName: nullableText(100),
   motherPhone: nullableText(30),
+  motherEmail: z.string().email().nullable().optional().or(z.literal("").transform(() => null)),
+  motherOccupation: nullableText(100),
   guardianName: nullableText(100),
   guardianRelation: nullableText(100),
   guardianPhone: nullableText(30),
+  guardianEmail: z.string().email().nullable().optional().or(z.literal("").transform(() => null)),
+  guardianOccupation: nullableText(100),
+  nationality: nullableText(100),
+  admissionType: z.nativeEnum(AdmissionType).optional(),
+  rteEnabled: z.boolean().optional(),
+  rteSchemeName: nullableText(150),
+  rteCertificateNo: nullableText(100),
+  transportOptIn: z.boolean().optional(),
+  transportRoute: nullableText(150),
+  hostelOptIn: z.boolean().optional(),
+  hostelRoom: nullableText(100),
+  additionalNotes: nullableText(2000),
   classSectionId: z.string().min(1),
   rollNumber: nullableText(30),
 }).strict();

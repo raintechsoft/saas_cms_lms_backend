@@ -61,6 +61,11 @@ enum StudentStatus {
   ALUMNI
 }
 
+enum AdmissionType {
+  REGULAR
+  TRANSFER
+}
+
 enum EnrollmentStatus {
   ACTIVE
   PROMOTED
@@ -522,11 +527,27 @@ model Student {
   permanentAddress   String?             @map("permanent_address") @db.Text
   fatherName         String?             @map("father_name")
   fatherPhone        String?             @map("father_phone")
+  fatherEmail        String?             @map("father_email")
+  fatherOccupation   String?             @map("father_occupation")
   motherName         String?             @map("mother_name")
   motherPhone        String?             @map("mother_phone")
+  motherEmail        String?             @map("mother_email")
+  motherOccupation   String?             @map("mother_occupation")
   guardianName       String?             @map("guardian_name")
   guardianRelation   String?             @map("guardian_relation")
   guardianPhone      String?             @map("guardian_phone")
+  guardianEmail      String?             @map("guardian_email")
+  guardianOccupation String?             @map("guardian_occupation")
+  nationality        String?
+  admissionType      AdmissionType       @default(REGULAR) @map("admission_type")
+  rteEnabled         Boolean             @default(false) @map("rte_enabled")
+  rteSchemeName      String?             @map("rte_scheme_name")
+  rteCertificateNo   String?             @map("rte_certificate_no")
+  transportOptIn     Boolean             @default(false) @map("transport_opt_in")
+  transportRoute     String?             @map("transport_route")
+  hostelOptIn        Boolean             @default(false) @map("hostel_opt_in")
+  hostelRoom         String?             @map("hostel_room")
+  additionalNotes    String?             @map("additional_notes") @db.Text
   status             StudentStatus       @default(ACTIVE)
   disabledReason     String?             @map("disabled_reason")
   siblingGroupId     String?             @map("sibling_group_id")

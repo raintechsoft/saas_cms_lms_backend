@@ -1,4 +1,5 @@
 import {
+  type AdmissionType,
   EnrollmentStatus,
   type Gender,
   type StudentStatus,
@@ -29,11 +30,27 @@ interface StudentInput {
   permanentAddress?: string | null;
   fatherName?: string | null;
   fatherPhone?: string | null;
+  fatherEmail?: string | null;
+  fatherOccupation?: string | null;
   motherName?: string | null;
   motherPhone?: string | null;
+  motherEmail?: string | null;
+  motherOccupation?: string | null;
   guardianName?: string | null;
   guardianRelation?: string | null;
   guardianPhone?: string | null;
+  guardianEmail?: string | null;
+  guardianOccupation?: string | null;
+  nationality?: string | null;
+  admissionType?: AdmissionType;
+  rteEnabled?: boolean;
+  rteSchemeName?: string | null;
+  rteCertificateNo?: string | null;
+  transportOptIn?: boolean;
+  transportRoute?: string | null;
+  hostelOptIn?: boolean;
+  hostelRoom?: string | null;
+  additionalNotes?: string | null;
   classSectionId: string;
   rollNumber?: string | null;
 }
@@ -190,11 +207,27 @@ export async function createStudent(tenantId: string, input: StudentInput) {
         permanentAddress: input.permanentAddress,
         fatherName: input.fatherName,
         fatherPhone: input.fatherPhone,
+        fatherEmail: input.fatherEmail,
+        fatherOccupation: input.fatherOccupation,
         motherName: input.motherName,
         motherPhone: input.motherPhone,
+        motherEmail: input.motherEmail,
+        motherOccupation: input.motherOccupation,
         guardianName: input.guardianName,
         guardianRelation: input.guardianRelation,
         guardianPhone: input.guardianPhone,
+        guardianEmail: input.guardianEmail,
+        guardianOccupation: input.guardianOccupation,
+        nationality: input.nationality,
+        admissionType: input.admissionType,
+        rteEnabled: input.rteEnabled,
+        rteSchemeName: input.rteSchemeName,
+        rteCertificateNo: input.rteCertificateNo,
+        transportOptIn: input.transportOptIn,
+        transportRoute: input.transportRoute,
+        hostelOptIn: input.hostelOptIn,
+        hostelRoom: input.hostelRoom,
+        additionalNotes: input.additionalNotes,
         enrollments: {
           create: {
             tenantId,
