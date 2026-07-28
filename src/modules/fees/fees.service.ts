@@ -1017,14 +1017,3 @@ export async function carryForwardPreviousDues(
     return { amount, assignment };
   });
 }
-
-export function updateFeeReminder(
-  tenantId: string,
-  input: { autoReminder: boolean; reminderDaysBefore: number; reminderDaysAfter: number },
-) {
-  return prisma.tenantFeeSetting.upsert({
-    where: { tenantId },
-    create: { tenantId, ...input },
-    update: input,
-  });
-}

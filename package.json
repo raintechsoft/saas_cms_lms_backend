@@ -36,6 +36,7 @@
     "nodemailer": "^9.0.3",
     "nodemon": "^3.1.14",
     "pg": "^8.22.0",
+    "web-push": "^3.6.7",
     "zod": "^4.0.5"
   },
   "devDependencies": {
@@ -46,6 +47,7 @@
     "@types/node": "^24.0.15",
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",
+    "@types/web-push": "^3.6.4",
     "prisma": "^6.12.0",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",

@@ -49,6 +49,9 @@ const schema = z
     TWILIO_ACCOUNT_SID: z.string().min(1).optional(),
     TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
     TWILIO_FROM_NUMBER: z.string().min(1).optional(),
+    PUSH_VAPID_PUBLIC_KEY: z.string().min(1).optional(),
+    PUSH_VAPID_PRIVATE_KEY: z.string().min(1).optional(),
+    PUSH_CONTACT_EMAIL: z.string().email().optional(),
     GOOGLE_CLIENT_ID: z.string().min(1).optional(),
     STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
     S3_BUCKET: z.string().min(1).optional(),
@@ -103,6 +106,33 @@ const schema = z
       }
     }
 
+    const anyPush = Boolean(
+      value.PUSH_VAPID_PUBLIC_KEY || value.PUSH_VAPID_PRIVATE_KEY || value.PUSH_CONTACT_EMAIL,
+    );
+    if (anyPush) {
+      if (!value.PUSH_VAPID_PUBLIC_KEY) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["PUSH_VAPID_PUBLIC_KEY"],
+          message: "PUSH_VAPID_PUBLIC_KEY is required when push is configured",
+        });
+      }
+      if (!value.PUSH_VAPID_PRIVATE_KEY) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["PUSH_VAPID_PRIVATE_KEY"],
+          message: "PUSH_VAPID_PRIVATE_KEY is required when push is configured",
+        });
+      }
+      if (!value.PUSH_CONTACT_EMAIL) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["PUSH_CONTACT_EMAIL"],
+          message: "PUSH_CONTACT_EMAIL is required when push is configured",
+        });
+      }
+    }
+
     if (value.STORAGE_DRIVER === "s3") {
       if (!value.S3_BUCKET) {
         ctx.addIssue({ code: "custom", path: ["S3_BUCKET"], message: "S3_BUCKET is required when STORAGE_DRIVER=s3" });
@@ -128,4 +158,8 @@ export const env = schema.parse(process.env);
 
 export function isTwilioEnvConfigured() {
   return Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER);
+}
+
+export function isPushEnvConfigured() {
+  return Boolean(env.PUSH_VAPID_PUBLIC_KEY && env.PUSH_VAPID_PRIVATE_KEY && env.PUSH_CONTACT_EMAIL);
 }

@@ -1,19 +1,16 @@
 import {
-  DiscountType,
   EnrollmentStatus,
-  FeeAssignmentStatus,
-  FeeFineType,
   NotificationType,
   NoticeAudience,
-  PaymentStatus,
-  Prisma,
   UserStatus,
 } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
+import { env } from "../../config/env.js";
 import { prisma } from "../../lib/prisma.js";
+import { isPushConfigured, sendWebPush } from "../../lib/push.js";
 import { sendMail } from "../../lib/mail.js";
-import { sendSms } from "../../lib/sms.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
+import { sendFeeRemindersForSession } from "./fee-reminders.js";
 
 async function getUserRoleCodes(tenantId: string, userId: string) {
   const roles = await prisma.userRole.findMany({
@@ -30,69 +27,67 @@ function relevantAudiences(roleCodes: string[]) {
   return audiences;
 }
 
-function money(value: Prisma.Decimal | number | string | null | undefined) {
-  return Number(value ?? 0);
+type PushSubscriptionInput = {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+};
+
+export async function savePushSubscription(
+  tenantId: string,
+  userId: string,
+  input: PushSubscriptionInput,
+  userAgent?: string,
+) {
+  const endpoint = input.endpoint.trim();
+  const p256dh = input.keys.p256dh.trim();
+  const auth = input.keys.auth.trim();
+
+  if (!endpoint || !p256dh || !auth) {
+    throw new AppError(400, "Invalid push subscription payload", "INVALID_PUSH_SUBSCRIPTION");
+  }
+
+  return prisma.pushSubscription.upsert({
+    where: { tenantId_endpoint: { tenantId, endpoint } },
+    create: { tenantId, userId, endpoint, p256dh, auth, userAgent },
+    update: { userId, p256dh, auth, userAgent },
+    select: { id: true, endpoint: true, updatedAt: true },
+  });
 }
 
-function calculateDiscount(
-  type: DiscountType | undefined,
-  value: Prisma.Decimal | undefined,
-  base: number,
-) {
-  if (!type || !value) return 0;
-  const discount =
-    type === DiscountType.PERCENTAGE ? (base * money(value)) / 100 : money(value);
-  return Math.min(base, Math.max(0, discount));
+export async function removePushSubscription(tenantId: string, userId: string, endpoint: string) {
+  const result = await prisma.pushSubscription.deleteMany({
+    where: { tenantId, userId, endpoint },
+  });
+  return { removed: result.count };
 }
 
-function calculateFine(
-  fineType: FeeFineType,
-  fineValue: Prisma.Decimal,
-  base: number,
-  dueDate: Date,
-  graceDays: number,
-  asOf: Date,
+export async function sendPushToUser(
+  tenantId: string,
+  userId: string,
+  payload: { title: string; body: string; url?: string; type?: string },
 ) {
-  const effectiveDue = new Date(dueDate);
-  effectiveDue.setUTCDate(effectiveDue.getUTCDate() + graceDays);
-  if (fineType === FeeFineType.NONE || asOf <= effectiveDue) return 0;
-  return fineType === FeeFineType.PERCENTAGE
-    ? (base * money(fineValue)) / 100
-    : money(fineValue);
-}
+  const subscriptions = await prisma.pushSubscription.findMany({
+    where: { tenantId, userId },
+    select: { id: true, endpoint: true, p256dh: true, auth: true },
+  });
+  if (!subscriptions.length) return { delivered: 0, failed: 0 };
 
-function toDue(
-  assignment: Prisma.StudentFeeAssignmentGetPayload<{
-    include: {
-      feeMaster: true;
-      discount: true;
-      paymentItems: true;
-    };
-  }>,
-  asOf: Date,
-) {
-  const base =
-    money(assignment.customAmount ?? assignment.feeMaster.amount) +
-    money(assignment.carryForwardAmount);
-  const discount = calculateDiscount(
-    assignment.discount?.type,
-    assignment.discount?.value,
-    base,
-  );
-  const fine = calculateFine(
-    assignment.feeMaster.fineType,
-    assignment.feeMaster.fineValue,
-    base,
-    assignment.feeMaster.dueDate,
-    assignment.feeMaster.graceDays,
-    asOf,
-  );
-  const paid = assignment.paymentItems.reduce(
-    (sum, item) => sum + money(item.paidAmount),
-    0,
-  );
-  const balance = Math.max(0, base - discount + fine - paid);
-  return { totals: { balance } };
+  let delivered = 0;
+  let failed = 0;
+  for (const sub of subscriptions) {
+    const result = await sendWebPush(sub, payload);
+    if (result.delivered) {
+      delivered += 1;
+      continue;
+    }
+
+    failed += 1;
+    if (result.statusCode === 404 || result.statusCode === 410) {
+      await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
+    }
+  }
+
+  return { delivered, failed };
 }
 
 export async function listNotifications(
@@ -297,6 +292,18 @@ export async function createNotification(
     },
   });
 
+  if (notification.targetUserId && isPushConfigured()) {
+    await sendPushToUser(tenantId, notification.targetUserId, {
+      title,
+      body,
+      type: notification.type,
+      url: `${env.WEB_ORIGIN}/#/notifications`,
+    }).catch((error) => {
+      const message = error instanceof Error ? error.message : "push send failed";
+      console.error(`[notifications] Push send failed: ${message}`);
+    });
+  }
+
   if (!input.sendEmail) return notification;
 
   const audience = input.audience ?? NoticeAudience.ALL;
@@ -373,227 +380,34 @@ export async function markAllRead(tenantId: string, userId: string) {
   return { updated: result.count };
 }
 
-const assignmentInclude = {
-  feeMaster: true,
-  discount: true,
-  paymentItems: {
-    where: { payment: { status: PaymentStatus.COLLECTED } },
-    include: { payment: true },
-  },
-} satisfies Prisma.StudentFeeAssignmentInclude;
-
-async function sendEmailOnly(to: string, subject: string, text: string, tenantId?: string) {
-  try {
-    await sendMail({ to, subject, text, tenantId });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Email send failed";
-    console.error(`[notifications] Email send failed to ${to}: ${message}`);
-  }
-}
-
 export async function sendFeeOverdueReminders(
   tenantId: string,
   createdById: string,
   sessionId: string,
 ) {
-  const session = await prisma.academicSession.findFirst({
-    where: tenantScope(tenantId, { id: sessionId }),
-    select: { id: true, name: true },
+  const setting = await prisma.tenantFeeSetting.findUnique({ where: { tenantId } });
+  return sendFeeRemindersForSession(tenantId, createdById, sessionId, {
+    mode: "all_due",
+    sendEmail: setting?.reminderEmailEnabled !== false,
+    sendSms: setting?.reminderSmsEnabled !== false,
+    minBalance: setting?.reminderMinBalance !== false ? 5 : 0,
+    title: "Fee overdue reminder",
   });
-  if (!session) throw new AppError(404, "Academic session not found", "SESSION_NOT_FOUND");
+}
 
-  const asOf = new Date();
-  const assignments = await prisma.studentFeeAssignment.findMany({
-    where: tenantScope(tenantId, {
-      status: FeeAssignmentStatus.ACTIVE,
-      feeMaster: { academicSessionId: sessionId },
-    }),
-    include: {
-      ...assignmentInclude,
-      studentEnrollment: {
-        select: {
-          classSectionId: true,
-          student: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              mobile: true,
-              fatherEmail: true,
-              motherEmail: true,
-              guardianEmail: true,
-              fatherPhone: true,
-              motherPhone: true,
-              guardianPhone: true,
-              user: { select: { id: true, email: true, phone: true } },
-              guardians: {
-                select: {
-                  user: { select: { id: true, email: true, phone: true, status: true } },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
+export async function sendPushTestNotification(tenantId: string, userId: string) {
+  if (!isPushConfigured()) {
+    throw new AppError(
+      400,
+      "Push is not configured. Add PUSH_VAPID_PUBLIC_KEY, PUSH_VAPID_PRIVATE_KEY, PUSH_CONTACT_EMAIL.",
+      "PUSH_NOT_CONFIGURED",
+    );
+  }
+  return sendPushToUser(tenantId, userId, {
+    title: "Push notifications enabled",
+    body: "This is a test push from SaaS CMS LMS.",
+    type: "ANNOUNCEMENT",
+    url: `${env.WEB_ORIGIN}/#/notifications`,
   });
-
-  const byStudent = new Map<
-    string,
-    {
-      classSectionId: string;
-      balance: number;
-      studentName: string;
-      studentUserId: string | null;
-      studentEmail: string | null;
-      smsNumbers: string[];
-      parentUsers: Array<{ userId: string; email: string }>;
-      parentContactEmails: string[];
-    }
-  >();
-
-  for (const assignment of assignments) {
-    const due = toDue(assignment as any, asOf);
-    const balance = due.totals.balance;
-    if (balance <= 0) continue;
-
-    const student = assignment.studentEnrollment.student;
-    const key = student.id;
-    const existing = byStudent.get(key);
-    if (existing) {
-      existing.balance += balance;
-      continue;
-    }
-
-    const studentName = [student.firstName, student.lastName].filter(Boolean).join(" ").trim() || "Student";
-    const coveredEmails = new Set<string>();
-
-    const studentUserId = student.user?.id ?? null;
-    const studentEmail =
-      normalizeEmail(student.user?.email) ?? normalizeEmail(student.email);
-    if (studentEmail) coveredEmails.add(studentEmail);
-
-    const parentUsers: Array<{ userId: string; email: string }> = [];
-    for (const link of student.guardians) {
-      if (link.user.status !== UserStatus.ACTIVE) continue;
-      const email = normalizeEmail(link.user.email);
-      if (!email) continue;
-      if (parentUsers.some((p) => p.userId === link.user.id)) continue;
-      parentUsers.push({ userId: link.user.id, email });
-      coveredEmails.add(email);
-    }
-
-    const parentContactEmails = [
-      student.fatherEmail,
-      student.motherEmail,
-      student.guardianEmail,
-    ]
-      .map(normalizeEmail)
-      .filter((email): email is string => Boolean(email))
-      .filter((email) => !coveredEmails.has(email));
-
-    const smsNumbers = [
-      student.mobile,
-      student.user?.phone,
-      student.fatherPhone,
-      student.motherPhone,
-      student.guardianPhone,
-      ...student.guardians.map((link) => link.user.phone),
-    ]
-      .map((value) => value?.trim())
-      .filter((value): value is string => Boolean(value));
-
-    byStudent.set(key, {
-      classSectionId: assignment.studentEnrollment.classSectionId,
-      balance,
-      studentName,
-      studentUserId,
-      studentEmail,
-      smsNumbers: [...new Set(smsNumbers)],
-      parentUsers,
-      parentContactEmails: [...new Set(parentContactEmails)],
-    });
-  }
-
-  let sent = 0;
-  let smsSent = 0;
-  let smsFailed = 0;
-  const smsErrors: string[] = [];
-
-  for (const item of byStudent.values()) {
-    const title = "Fee overdue reminder";
-    const amount = item.balance.toFixed(2);
-    const studentBody = [
-      `Hello ${item.studentName},`,
-      ``,
-      `Your outstanding fee balance for ${session.name} is ${amount}.`,
-      `Please pay at your earliest convenience to avoid further delays.`,
-      ``,
-      `Thank you.`,
-    ].join("\n");
-    const parentBody = [
-      `Hello,`,
-      ``,
-      `This is a fee overdue reminder for ${item.studentName}.`,
-      `Outstanding fee balance for ${session.name} is ${amount}.`,
-      `Please arrange payment at your earliest convenience.`,
-      ``,
-      `Thank you.`,
-    ].join("\n");
-
-    // Student: in-app + email (login account), or email-only fallback.
-    if (item.studentUserId) {
-      await createNotification(tenantId, createdById, {
-        title,
-        body: studentBody,
-        type: NotificationType.FEE_OVERDUE,
-        audience: NoticeAudience.STUDENTS,
-        classSectionId: item.classSectionId,
-        targetUserId: item.studentUserId,
-        sendEmail: true,
-      });
-      sent += 1;
-    } else if (item.studentEmail) {
-      await sendEmailOnly(item.studentEmail, title, studentBody, tenantId);
-      sent += 1;
-    }
-
-    // Linked parent login accounts: in-app + email.
-    for (const parent of item.parentUsers) {
-      await createNotification(tenantId, createdById, {
-        title,
-        body: parentBody,
-        type: NotificationType.FEE_OVERDUE,
-        audience: NoticeAudience.PARENTS,
-        classSectionId: item.classSectionId,
-        targetUserId: parent.userId,
-        sendEmail: true,
-      });
-      sent += 1;
-    }
-
-    // Parent contact emails on student record (no login): email only.
-    for (const email of item.parentContactEmails) {
-      await sendEmailOnly(email, title, parentBody, tenantId);
-      sent += 1;
-    }
-
-    const smsBody = `Fee overdue: ${item.studentName} owes ${amount} for ${session.name}. Please pay soon.`;
-    for (const phone of item.smsNumbers) {
-      try {
-        const result = await sendSms({ tenantId, to: phone, body: smsBody });
-        if (result.delivered) smsSent += 1;
-        else smsFailed += 1;
-      } catch (err) {
-        smsFailed += 1;
-        const message = err instanceof Error ? err.message : "SMS send failed";
-        smsErrors.push(`${phone}: ${message}`);
-        console.error(`[notifications] SMS send failed to ${phone}: ${message}`);
-      }
-    }
-  }
-
-  return { count: sent, smsSent, smsFailed, smsErrors: smsErrors.slice(0, 5) };
 }
 

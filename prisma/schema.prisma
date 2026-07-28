@@ -318,6 +318,7 @@ model Tenant {
   onlineAdmissions       OnlineAdmissionApplication[]
   notices                Notice[]
   notifications          Notification[]
+  pushSubscriptions      PushSubscription[]
 
   @@index([resellerId])
   @@map("tenants")
@@ -366,6 +367,7 @@ model User {
   notifications            NotificationRead[]
   sentNotifications       Notification[]     @relation("NotificationAuthor")
   targetedNotifications   Notification[] @relation("NotificationTarget")
+  pushSubscriptions       PushSubscription[]
 
   @@unique([tenantId, email])
   @@index([email])
@@ -886,14 +888,21 @@ model FeePaymentItem {
 }
 
 model TenantFeeSetting {
-  id                 String   @id @default(cuid())
-  tenantId           String   @unique @map("tenant_id")
-  autoReminder       Boolean  @default(false) @map("auto_reminder")
-  reminderDaysBefore Int      @default(3) @map("reminder_days_before")
-  reminderDaysAfter  Int      @default(1) @map("reminder_days_after")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
-  tenant             Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                     String    @id @default(cuid())
+  tenantId               String    @unique @map("tenant_id")
+  autoReminder           Boolean   @default(false) @map("auto_reminder")
+  reminderDaysBefore     Int       @default(3) @map("reminder_days_before")
+  reminderDaysAfter      Int       @default(1) @map("reminder_days_after")
+  reminderEmailEnabled   Boolean   @default(true) @map("reminder_email_enabled")
+  reminderSmsEnabled     Boolean   @default(true) @map("reminder_sms_enabled")
+  reminderExecutionTime  String    @default("09:00") @map("reminder_execution_time")
+  reminderSkipWeekends   Boolean   @default(true) @map("reminder_skip_weekends")
+  reminderMinBalance     Boolean   @default(true) @map("reminder_min_balance")
+  reminderSteps          Json?     @map("reminder_steps")
+  lastReminderRunAt      DateTime? @map("last_reminder_run_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+  tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("tenant_fee_settings")
 }
@@ -1839,4 +1848,22 @@ model NotificationRead {
 
   @@unique([notificationId, userId])
   @@map("notification_reads")
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  userId    String   @map("user_id")
+  endpoint  String
+  p256dh    String
+  auth      String
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, endpoint])
+  @@index([tenantId, userId])
+  @@map("push_subscriptions")
 }

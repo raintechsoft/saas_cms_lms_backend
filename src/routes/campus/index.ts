@@ -65,6 +65,9 @@ import {
   markAllReadController,
   markReadController,
   sendFeeOverdueRemindersController,
+  subscribePushController,
+  testPushController,
+  unsubscribePushController,
 } from "../../modules/notifications/notifications.controller.js";
 import {
   getSettingsController,
@@ -93,6 +96,7 @@ import {
   updateFeeDiscountController,
   updateFeeGroupController,
   updateFeeMasterController,
+  runFeeRemindersController,
   updateFeeReminderController,
   updateFeeTypeController,
   updateReceiptBookController,
@@ -273,6 +277,18 @@ campusRouter.post(
   "/notifications/fee-overdue",
   requirePermission("fees.manage"),
   asyncHandler(sendFeeOverdueRemindersController),
+);
+campusRouter.post(
+  "/notifications/push/subscribe",
+  asyncHandler(subscribePushController),
+);
+campusRouter.delete(
+  "/notifications/push/unsubscribe",
+  asyncHandler(unsubscribePushController),
+);
+campusRouter.post(
+  "/notifications/push/test",
+  asyncHandler(testPushController),
 );
 
 campusRouter.get(
@@ -579,6 +595,12 @@ campusRouter.put(
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(updateFeeReminderController),
+);
+campusRouter.post(
+  "/fees/reminders/run",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(runFeeRemindersController),
 );
 campusRouter.post(
   "/fees/carry-forward",

@@ -7,6 +7,9 @@ import {
   listNotifications,
   markAllRead,
   markRead,
+  removePushSubscription,
+  savePushSubscription,
+  sendPushTestNotification,
   sendFeeOverdueReminders,
 } from "./notifications.service.js";
 
@@ -25,6 +28,18 @@ const createNotificationBody = z.object({
 
 const feeOverdueBody = z.object({
   sessionId: z.string().min(1),
+});
+
+const pushSubscriptionBody = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+});
+
+const pushUnsubscribeBody = z.object({
+  endpoint: z.string().url(),
 });
 
 export async function listNotificationsController(req: Request, res: Response) {
@@ -65,6 +80,28 @@ export async function markAllReadController(req: Request, res: Response) {
 export async function sendFeeOverdueRemindersController(req: Request, res: Response) {
   const { sessionId } = feeOverdueBody.parse(req.body);
   const result = await sendFeeOverdueReminders(req.auth!.tenantId!, req.auth!.userId, sessionId);
+  res.json({ data: result });
+}
+
+export async function subscribePushController(req: Request, res: Response) {
+  const payload = pushSubscriptionBody.parse(req.body);
+  const result = await savePushSubscription(
+    req.auth!.tenantId!,
+    req.auth!.userId,
+    payload,
+    req.get("user-agent") ?? undefined,
+  );
+  res.status(201).json({ data: result });
+}
+
+export async function unsubscribePushController(req: Request, res: Response) {
+  const { endpoint } = pushUnsubscribeBody.parse(req.body);
+  const result = await removePushSubscription(req.auth!.tenantId!, req.auth!.userId, endpoint);
+  res.json({ data: result });
+}
+
+export async function testPushController(req: Request, res: Response) {
+  const result = await sendPushTestNotification(req.auth!.tenantId!, req.auth!.userId);
   res.json({ data: result });
 }
 

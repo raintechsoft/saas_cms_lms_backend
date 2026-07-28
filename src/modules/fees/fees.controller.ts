@@ -28,10 +28,13 @@ import {
   updateFeeDiscount,
   updateFeeGroup,
   updateFeeMaster,
-  updateFeeReminder,
   updateFeeType,
   updateReceiptBook,
 } from "./fees.service.js";
+import {
+  runFeeRemindersNow,
+  updateFeeReminder,
+} from "./fee-reminders.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
 const feeTypeBody = z.object({
@@ -114,10 +117,27 @@ const summaryQuery = z.object({
   sessionId: z.string().min(1),
   asOf: z.coerce.date().optional(),
 });
+const reminderStepBody = z.object({
+  id: z.string().optional(),
+  days: z.coerce.number().int().min(0).max(90),
+  when: z.enum(["before", "after"]),
+  notice: z.string().trim().min(1).max(120),
+  email: z.boolean(),
+  sms: z.boolean(),
+});
 const reminderBody = z.object({
   autoReminder: z.boolean(),
-  reminderDaysBefore: z.coerce.number().int().min(0).max(90),
-  reminderDaysAfter: z.coerce.number().int().min(0).max(90),
+  reminderDaysBefore: z.coerce.number().int().min(0).max(90).optional().default(3),
+  reminderDaysAfter: z.coerce.number().int().min(0).max(90).optional().default(1),
+  reminderEmailEnabled: z.boolean().optional(),
+  reminderSmsEnabled: z.boolean().optional(),
+  reminderExecutionTime: z.string().trim().optional(),
+  reminderSkipWeekends: z.boolean().optional(),
+  reminderMinBalance: z.boolean().optional(),
+  reminderSteps: z.array(reminderStepBody).min(1).max(10).optional(),
+});
+const reminderRunBody = z.object({
+  sessionId: z.string().min(1).optional(),
 });
 const carryForwardBody = z.object({
   fromSessionId: z.string().min(1),
@@ -283,8 +303,26 @@ export async function getFeeSummaryController(req: Request, res: Response) {
 }
 
 export async function updateFeeReminderController(req: Request, res: Response) {
+  const body = reminderBody.parse(req.body);
   res.json({
-    data: await updateFeeReminder(req.auth!.tenantId!, reminderBody.parse(req.body)),
+    data: await updateFeeReminder(req.auth!.tenantId!, {
+      autoReminder: body.autoReminder,
+      reminderDaysBefore: body.reminderDaysBefore,
+      reminderDaysAfter: body.reminderDaysAfter,
+      reminderEmailEnabled: body.reminderEmailEnabled,
+      reminderSmsEnabled: body.reminderSmsEnabled,
+      reminderExecutionTime: body.reminderExecutionTime,
+      reminderSkipWeekends: body.reminderSkipWeekends,
+      reminderMinBalance: body.reminderMinBalance,
+      reminderSteps: body.reminderSteps,
+    }),
+  });
+}
+
+export async function runFeeRemindersController(req: Request, res: Response) {
+  const { sessionId } = reminderRunBody.parse(req.body ?? {});
+  res.json({
+    data: await runFeeRemindersNow(req.auth!.tenantId!, req.auth!.userId, sessionId),
   });
 }
 
