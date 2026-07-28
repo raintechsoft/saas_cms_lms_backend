@@ -449,6 +449,7 @@ async function main() {
   if (!tenant) {
     throw new Error('Tenant "demo-school" not found. Run `npm run db:seed` first.');
   }
+  const tenantId = tenant.id;
 
   let session = await prisma.academicSession.findFirst({
     where: { tenantId: tenant.id, isCurrent: true },
@@ -481,7 +482,7 @@ async function main() {
     const key = `${className}::${sectionName}`;
     if (classCache.has(key)) return classCache.get(key)!;
     const sortOrder = Number(className.replace(/\D/g, "")) || 0;
-    const cs = await ensureClassSection(tenant.id, session!.id, className, sectionName, sortOrder);
+    const cs = await ensureClassSection(tenantId, session!.id, className, sectionName, sortOrder);
     classCache.set(key, cs.id);
     return cs.id;
   }

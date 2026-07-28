@@ -3,12 +3,17 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import {
   addMarkComponent,
+  archiveExam,
   assignExamStudents,
   createExam,
   createExamAspect,
   createExamGrade,
   createExamGroup,
   createExamSchedule,
+  deleteExam,
+  deleteExamGrade,
+  deleteExamGroup,
+  deleteExamSchedule,
   getExamResults,
   getExamGroupResults,
   getExamSetup,
@@ -16,6 +21,10 @@ import {
   publishExam,
   saveAspectValues,
   saveExamMarks,
+  updateExam,
+  updateExamGrade,
+  updateExamGroup,
+  updateExamSchedule,
 } from "./exams.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
@@ -169,4 +178,60 @@ export async function getExamResultsController(req: Request, res: Response) {
 export async function getExamGroupResultsController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   res.json({ data: await getExamGroupResults(req.auth!.tenantId!, id) });
+}
+
+const gradeUpdateBody = gradeBody.partial().omit({ resultType: true });
+const groupUpdateBody = groupBody.partial().omit({ academicSessionId: true });
+const examUpdateBody = examBody.partial().omit({ examGroupId: true });
+const scheduleUpdateBody = scheduleBody.partial().omit({ classSectionId: true, classSubjectId: true });
+
+export async function updateExamGradeController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await updateExamGrade(req.auth!.tenantId!, id, gradeUpdateBody.parse(req.body)) });
+}
+
+export async function deleteExamGradeController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteExamGrade(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function updateExamGroupController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await updateExamGroup(req.auth!.tenantId!, id, groupUpdateBody.parse(req.body)) });
+}
+
+export async function deleteExamGroupController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteExamGroup(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function updateExamController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await updateExam(req.auth!.tenantId!, id, examUpdateBody.parse(req.body)) });
+}
+
+export async function archiveExamController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await archiveExam(req.auth!.tenantId!, id) });
+}
+
+export async function deleteExamController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteExam(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function updateExamScheduleController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateExamSchedule(req.auth!.tenantId!, id, scheduleUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteExamScheduleController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteExamSchedule(req.auth!.tenantId!, id);
+  res.status(204).send();
 }

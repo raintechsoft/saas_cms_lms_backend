@@ -23,6 +23,21 @@ import {
 
 const nullableText = (max = 255) => z.string().trim().max(max).nullable().optional();
 const idParams = z.object({ id: z.string().min(1) });
+
+/** Accepts absolute URLs, relative upload paths, empty → null. */
+const nullablePhotoUrl = z
+  .union([
+    z.literal(""),
+    z.null(),
+    z.string().trim().url(),
+    z
+      .string()
+      .trim()
+      .regex(/^\/uploads\/.+/i, "Invalid photo path"),
+  ])
+  .optional()
+  .transform((value) => (value === "" || value == null ? null : value));
+
 const studentBody = z.object({
   admissionNumber: z.string().trim().min(1).max(50).regex(/^[^/\\]+$/).optional(),
   firstName: z.string().trim().min(1).max(100),
@@ -36,7 +51,7 @@ const studentBody = z.object({
   mobile: nullableText(30),
   email: z.string().email().nullable().optional().or(z.literal("").transform(() => null)),
   admissionDate: z.coerce.date(),
-  photoUrl: z.string().url().nullable().optional().or(z.literal("").transform(() => null)),
+  photoUrl: nullablePhotoUrl,
   bloodGroup: nullableText(10),
   height: z.number().positive().max(300).nullable().optional(),
   weight: z.number().positive().max(500).nullable().optional(),

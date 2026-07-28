@@ -626,3 +626,162 @@ export async function getExamGroupResults(tenantId: string, groupId: string) {
     }),
   };
 }
+
+export async function updateExamGrade(
+  tenantId: string,
+  id: string,
+  input: {
+    name?: string;
+    minPercent?: number;
+    maxPercent?: number;
+    gradePoint?: number | null;
+    passStatus?: PassStatus;
+  },
+) {
+  const existing = await prisma.examGrade.findFirst({ where: tenantScope(tenantId, { id }) });
+  if (!existing) throw new AppError(404, "Grade not found", "GRADE_NOT_FOUND");
+  const minPercent = input.minPercent ?? Number(existing.minPercent);
+  const maxPercent = input.maxPercent ?? Number(existing.maxPercent);
+  if (minPercent > maxPercent) {
+    throw new AppError(400, "Minimum percentage cannot exceed maximum", "INVALID_GRADE_RANGE");
+  }
+  const overlap = await prisma.examGrade.findFirst({
+    where: tenantScope(tenantId, {
+      id: { not: id },
+      resultType: existing.resultType,
+      minPercent: { lte: maxPercent },
+      maxPercent: { gte: minPercent },
+    }),
+  });
+  if (overlap) throw new AppError(409, "Grade range overlaps an existing grade", "GRADE_OVERLAP");
+  return prisma.examGrade.update({
+    where: { id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.minPercent !== undefined ? { minPercent: input.minPercent } : {}),
+      ...(input.maxPercent !== undefined ? { maxPercent: input.maxPercent } : {}),
+      ...(input.gradePoint !== undefined ? { gradePoint: input.gradePoint } : {}),
+      ...(input.passStatus !== undefined ? { passStatus: input.passStatus } : {}),
+    },
+  });
+}
+
+export async function deleteExamGrade(tenantId: string, id: string) {
+  const result = await prisma.examGrade.deleteMany({ where: tenantScope(tenantId, { id }) });
+  if (!result.count) throw new AppError(404, "Grade not found", "GRADE_NOT_FOUND");
+}
+
+export async function updateExamGroup(
+  tenantId: string,
+  id: string,
+  input: { name?: string; description?: string | null; resultType?: ExamResultType },
+) {
+  const existing = await prisma.examGroup.findFirst({ where: tenantScope(tenantId, { id }) });
+  if (!existing) throw new AppError(404, "Exam group not found", "EXAM_GROUP_NOT_FOUND");
+  return prisma.examGroup.update({
+    where: { id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
+      ...(input.resultType !== undefined ? { resultType: input.resultType } : {}),
+    },
+  });
+}
+
+export async function deleteExamGroup(tenantId: string, id: string) {
+  const group = await prisma.examGroup.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: { _count: { select: { exams: true } } },
+  });
+  if (!group) throw new AppError(404, "Exam group not found", "EXAM_GROUP_NOT_FOUND");
+  if (group._count.exams > 0) {
+    throw new AppError(409, "Remove or archive exams in this group first", "EXAM_GROUP_IN_USE");
+  }
+  await prisma.examGroup.delete({ where: { id } });
+}
+
+export async function updateExam(
+  tenantId: string,
+  id: string,
+  input: { name?: string; startDate?: Date; endDate?: Date },
+) {
+  const exam = await requireExam(tenantId, id);
+  if ((exam.status as string) === "ARCHIVED") {
+    throw new AppError(400, "Archived exams cannot be edited", "EXAM_ARCHIVED");
+  }
+  const startDate = input.startDate ?? exam.startDate;
+  const endDate = input.endDate ?? exam.endDate;
+  validateDateRange(startDate, endDate);
+  return prisma.exam.update({
+    where: { id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
+      ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
+    },
+    include: examInclude,
+  });
+}
+
+export async function archiveExam(tenantId: string, id: string) {
+  const exam = await requireExam(tenantId, id);
+  if ((exam.status as string) === "ARCHIVED") return exam;
+  return prisma.exam.update({
+    where: { id },
+    data: { status: "ARCHIVED" as ExamStatus },
+    include: examInclude,
+  });
+}
+
+export async function deleteExam(tenantId: string, id: string) {
+  const exam = await requireExam(tenantId, id);
+  if (exam.status === ExamStatus.PUBLISHED) {
+    throw new AppError(409, "Archive published exams instead of deleting", "EXAM_PUBLISHED");
+  }
+  await prisma.exam.delete({ where: { id } });
+}
+
+export async function updateExamSchedule(
+  tenantId: string,
+  scheduleId: string,
+  input: {
+    examDate?: Date;
+    startTime?: string;
+    endTime?: string;
+    room?: string | null;
+    maximumMarks?: number;
+    minimumMarks?: number;
+  },
+) {
+  const schedule = await prisma.examSchedule.findFirst({
+    where: tenantScope(tenantId, { id: scheduleId }),
+    include: { exam: true },
+  });
+  if (!schedule) throw new AppError(404, "Schedule not found", "SCHEDULE_NOT_FOUND");
+  if (schedule.exam.status !== ExamStatus.DRAFT) {
+    throw new AppError(400, "Only draft exam schedules can be edited", "EXAM_NOT_DRAFT");
+  }
+  return prisma.examSchedule.update({
+    where: { id: scheduleId },
+    data: {
+      ...(input.examDate !== undefined ? { examDate: input.examDate } : {}),
+      ...(input.startTime !== undefined ? { startTime: input.startTime } : {}),
+      ...(input.endTime !== undefined ? { endTime: input.endTime } : {}),
+      ...(input.room !== undefined ? { room: input.room } : {}),
+      ...(input.maximumMarks !== undefined ? { maximumMarks: input.maximumMarks } : {}),
+      ...(input.minimumMarks !== undefined ? { minimumMarks: input.minimumMarks } : {}),
+    },
+  });
+}
+
+export async function deleteExamSchedule(tenantId: string, scheduleId: string) {
+  const schedule = await prisma.examSchedule.findFirst({
+    where: tenantScope(tenantId, { id: scheduleId }),
+    include: { exam: true },
+  });
+  if (!schedule) throw new AppError(404, "Schedule not found", "SCHEDULE_NOT_FOUND");
+  if (schedule.exam.status !== ExamStatus.DRAFT) {
+    throw new AppError(400, "Only draft exam schedules can be deleted", "EXAM_NOT_DRAFT");
+  }
+  await prisma.examSchedule.delete({ where: { id: scheduleId } });
+}

@@ -27,6 +27,7 @@ const permissions = [
   ["fees.view", "View fees, dues, receipts, and reports"],
   ["fees.manage", "Manage fee setup and assignments"],
   ["fees.collect", "Collect and revert fee payments"],
+  ["notifications.manage", "Send campus notifications and announcements"],
   ["attendance.view", "View student attendance and reports"],
   ["attendance.manage", "Mark attendance, review leave, and award points"],
   ["exams.view", "View exam schedules, results, and print records"],

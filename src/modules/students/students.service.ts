@@ -2,11 +2,15 @@ import {
   type AdmissionType,
   EnrollmentStatus,
   type Gender,
+  type Prisma,
   type StudentStatus,
   TenantType,
 } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { randomInt } from "node:crypto";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
+import { ensureTenantRoles } from "../../lib/tenant-bootstrap.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 
 interface StudentInput {
@@ -156,6 +160,45 @@ async function validateStudentReferences(
   }
 }
 
+function normalizeLoginEmail(value?: string | null) {
+  const email = value?.trim().toLowerCase();
+  return email && email.includes("@") ? email : null;
+}
+
+function generateTempPassword(prefix: "Stu" | "Par") {
+  return `${prefix}@${randomInt(100000, 999999)}`;
+}
+
+async function resolveTenantRoleId(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  code: "STUDENT" | "PARENT",
+) {
+  let role = await tx.role.findFirst({
+    where: { tenantId, code },
+    select: { id: true },
+  });
+  if (!role) {
+    await ensureTenantRoles(tenantId, tx);
+    role = await tx.role.findFirst({
+      where: { tenantId, code },
+      select: { id: true },
+    });
+  }
+  if (!role) {
+    throw new AppError(500, `${code} role is missing for this institute`, "ROLE_MISSING");
+  }
+  return role.id;
+}
+
+export type PortalCredential = {
+  email: string;
+  password: string;
+  role: "STUDENT" | "PARENT";
+  relation?: string | null;
+  created: boolean;
+};
+
 export async function createStudent(tenantId: string, input: StudentInput) {
   await validateStudentReferences(tenantId, input);
   const classSection = await prisma.classSection.findFirst({
@@ -164,6 +207,12 @@ export async function createStudent(tenantId: string, input: StudentInput) {
   if (!classSection) {
     throw new AppError(400, "Class section is invalid", "INVALID_CLASS_SECTION");
   }
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { slug: true },
+  });
+  if (!tenant) throw new AppError(404, "Tenant not found", "TENANT_NOT_FOUND");
 
   return prisma.$transaction(async (tx) => {
     let admissionNumber = input.admissionNumber?.trim();
@@ -184,9 +233,131 @@ export async function createStudent(tenantId: string, input: StudentInput) {
       admissionNumber = `${setting.admissionPrefix ?? ""}${sequence}`;
     }
 
-    return tx.student.create({
+    const studentEmail =
+      normalizeLoginEmail(input.email) ??
+      `stu.${admissionNumber.toLowerCase().replace(/[^a-z0-9]+/g, "")}@${tenant.slug}.local`;
+
+    const fatherEmail = normalizeLoginEmail(input.fatherEmail);
+    const motherEmail = normalizeLoginEmail(input.motherEmail);
+    const guardianEmail = normalizeLoginEmail(input.guardianEmail);
+    const parentEmailCandidate = fatherEmail ?? motherEmail ?? guardianEmail;
+    const parentEmail =
+      parentEmailCandidate && parentEmailCandidate !== studentEmail ? parentEmailCandidate : null;
+    const parentRelation = fatherEmail
+      ? "Father"
+      : motherEmail
+        ? "Mother"
+        : input.guardianRelation?.trim() || "Guardian";
+    const parentFullName = (
+      (fatherEmail && input.fatherName) ||
+      (motherEmail && input.motherName) ||
+      input.guardianName ||
+      "Parent Account"
+    ).trim();
+    const parentFirstName = parentFullName.split(/\s+/)[0] || "Parent";
+    const parentLastName = parentFullName.split(/\s+/).slice(1).join(" ") || "Account";
+
+    const credentials: PortalCredential[] = [];
+    const studentPassword = generateTempPassword("Stu");
+    const studentRoleId = await resolveTenantRoleId(tx, tenantId, "STUDENT");
+
+    const existingStudentUser = await tx.user.findFirst({
+      where: tenantScope(tenantId, { email: studentEmail }),
+      select: { id: true },
+    });
+    if (existingStudentUser) {
+      throw new AppError(
+        409,
+        `Student login email already exists: ${studentEmail}`,
+        "STUDENT_LOGIN_EXISTS",
+      );
+    }
+
+    const studentUser = await tx.user.create({
       data: {
         tenantId,
+        email: studentEmail,
+        passwordHash: await bcrypt.hash(studentPassword, 12),
+        firstName: input.firstName.trim(),
+        lastName: input.lastName?.trim() || "Student",
+        phone: input.mobile?.trim() || null,
+        roles: {
+          create: [{ roleId: studentRoleId, tenantId }],
+        },
+      },
+      select: { id: true, email: true },
+    });
+    credentials.push({
+      email: studentUser.email,
+      password: studentPassword,
+      role: "STUDENT",
+      created: true,
+    });
+
+    let parentUserId: string | null = null;
+    if (parentEmail) {
+      const parentRoleId = await resolveTenantRoleId(tx, tenantId, "PARENT");
+      const existingParent = await tx.user.findFirst({
+        where: tenantScope(tenantId, { email: parentEmail }),
+        select: {
+          id: true,
+          email: true,
+          roles: { include: { role: { select: { code: true } } } },
+        },
+      });
+
+      if (existingParent) {
+        const isParent = existingParent.roles.some((item) => item.role.code === "PARENT");
+        if (!isParent) {
+          throw new AppError(
+            409,
+            `Parent email is already used by a non-parent account: ${parentEmail}`,
+            "PARENT_EMAIL_CONFLICT",
+          );
+        }
+        parentUserId = existingParent.id;
+        credentials.push({
+          email: existingParent.email,
+          password: "(existing account — use current password)",
+          role: "PARENT",
+          relation: parentRelation,
+          created: false,
+        });
+      } else {
+        const parentPassword = generateTempPassword("Par");
+        const parentUser = await tx.user.create({
+          data: {
+            tenantId,
+            email: parentEmail,
+            passwordHash: await bcrypt.hash(parentPassword, 12),
+            firstName: parentFirstName,
+            lastName: parentLastName,
+            phone:
+              (fatherEmail && input.fatherPhone) ||
+              (motherEmail && input.motherPhone) ||
+              input.guardianPhone ||
+              null,
+            roles: {
+              create: [{ roleId: parentRoleId, tenantId }],
+            },
+          },
+          select: { id: true, email: true },
+        });
+        parentUserId = parentUser.id;
+        credentials.push({
+          email: parentUser.email,
+          password: parentPassword,
+          role: "PARENT",
+          relation: parentRelation,
+          created: true,
+        });
+      }
+    }
+
+    const student = await tx.student.create({
+      data: {
+        tenantId,
+        userId: studentUser.id,
         admissionNumber,
         firstName: input.firstName,
         lastName: input.lastName,
@@ -197,7 +368,7 @@ export async function createStudent(tenantId: string, input: StudentInput) {
         religion: input.religion,
         caste: input.caste,
         mobile: input.mobile,
-        email: input.email?.trim().toLowerCase() || null,
+        email: normalizeLoginEmail(input.email) ?? studentEmail,
         admissionDate: input.admissionDate,
         photoUrl: input.photoUrl,
         bloodGroup: input.bloodGroup,
@@ -236,9 +407,23 @@ export async function createStudent(tenantId: string, input: StudentInput) {
             rollNumber: input.rollNumber,
           },
         },
+        ...(parentUserId
+          ? {
+              guardians: {
+                create: {
+                  tenantId,
+                  userId: parentUserId,
+                  relation: parentRelation,
+                  isPrimary: true,
+                },
+              },
+            }
+          : {}),
       },
       include: studentInclude,
     });
+
+    return { ...student, credentials };
   });
 }
 

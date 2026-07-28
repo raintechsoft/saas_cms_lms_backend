@@ -1,5 +1,6 @@
 import {
   createCipheriv,
+  createDecipheriv,
   createHash,
   randomBytes,
 } from "node:crypto";
@@ -31,6 +32,27 @@ function encryptSecrets(secrets: Record<string, string>) {
   ].join(".");
 }
 
+export function decryptSecrets(payload: string | null | undefined): Record<string, string> {
+  if (!payload) return {};
+  const [ivPart, tagPart, dataPart] = payload.split(".");
+  if (!ivPart || !tagPart || !dataPart) return {};
+  try {
+    const key = createHash("sha256")
+      .update(env.SETTINGS_ENCRYPTION_KEY ?? env.JWT_SECRET)
+      .digest();
+    const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(ivPart, "base64url"));
+    decipher.setAuthTag(Buffer.from(tagPart, "base64url"));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(dataPart, "base64url")),
+      decipher.final(),
+    ]);
+    const parsed = JSON.parse(decrypted.toString("utf8")) as Record<string, string>;
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 const integrationSelect = {
   id: true,
   category: true,
@@ -40,6 +62,21 @@ const integrationSelect = {
   updatedAt: true,
   encryptedSecrets: true,
 } satisfies Prisma.ErpIntegrationSettingSelect;
+
+export async function getTenantIntegration(
+  tenantId: string,
+  category: ErpSettingCategory,
+) {
+  const row = await prisma.erpIntegrationSetting.findFirst({
+    where: tenantScope(tenantId, { category }),
+    select: integrationSelect,
+  });
+  if (!row) return null;
+  return {
+    ...row,
+    secrets: decryptSecrets(row.encryptedSecrets),
+  };
+}
 
 export async function getErpSetup(tenantId: string) {
   const [

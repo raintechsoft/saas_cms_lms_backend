@@ -15,7 +15,7 @@ import {
   submitPortalHomework,
   updatePortalStudentProfile,
 } from "./portal-detail.service.js";
-import { createNotice, deleteNotice, listNotices } from "../notices/notices.service.js";
+import { createNotice, deleteNotice, listNotices, updateNotice } from "../notices/notices.service.js";
 
 const studentParams = z.object({ studentId: z.string().min(1) });
 const idParams = z.object({ id: z.string().min(1) });
@@ -212,4 +212,11 @@ export async function deleteCampusNoticeController(req: Request, res: Response) 
   const { id } = idParams.parse(req.params);
   await deleteNotice(req.auth!.tenantId!, id);
   res.status(204).send();
+}
+
+export async function updateCampusNoticeController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateNotice(req.auth!.tenantId!, id, noticeBody.partial().parse(req.body)),
+  });
 }

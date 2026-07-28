@@ -1,0 +1,70 @@
+import { NotificationType, NoticeAudience } from "@prisma/client";
+import type { Request, Response } from "express";
+import { z } from "zod";
+import {
+  createNotification,
+  getUnreadCount,
+  listNotifications,
+  markAllRead,
+  markRead,
+  sendFeeOverdueReminders,
+} from "./notifications.service.js";
+
+const notificationIdParams = z.object({ id: z.string().min(1) });
+const unreadResponse = z.object({ count: z.number() });
+
+const createNotificationBody = z.object({
+  title: z.string().trim().min(2).max(200),
+  body: z.string().trim().min(2).max(10000),
+  type: z.nativeEnum(NotificationType).optional(),
+  audience: z.nativeEnum(NoticeAudience).optional(),
+  classSectionId: z.string().min(1).nullable().optional(),
+  targetUserId: z.string().min(1).nullable().optional(),
+  sendEmail: z.boolean().optional(),
+});
+
+const feeOverdueBody = z.object({
+  sessionId: z.string().min(1),
+});
+
+export async function listNotificationsController(req: Request, res: Response) {
+  const wantsAll = String(req.query.scope ?? "") === "all";
+  const canManage = req.auth!.permissions.includes("notifications.manage");
+  const parsedLimit = Number(req.query.limit ?? (wantsAll && canManage ? 200 : 30));
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.min(Math.max(Math.trunc(parsedLimit), 1), 200)
+    : 30;
+  res.json({
+    data: await listNotifications(req.auth!.tenantId!, req.auth!.userId, limit, {
+      scope: wantsAll && canManage ? "all" : "inbox",
+    }),
+  });
+}
+
+export async function getUnreadCountController(req: Request, res: Response) {
+  const count = await getUnreadCount(req.auth!.tenantId!, req.auth!.userId);
+  res.json({ data: unreadResponse.parse({ count }) });
+}
+
+export async function createNotificationController(req: Request, res: Response) {
+  res.status(201).json({
+    data: await createNotification(req.auth!.tenantId!, req.auth!.userId, createNotificationBody.parse(req.body)),
+  });
+}
+
+export async function markReadController(req: Request, res: Response) {
+  const { id } = notificationIdParams.parse(req.params);
+  await markRead(req.auth!.tenantId!, req.auth!.userId, id);
+  res.status(204).send();
+}
+
+export async function markAllReadController(req: Request, res: Response) {
+  res.json({ data: await markAllRead(req.auth!.tenantId!, req.auth!.userId) });
+}
+
+export async function sendFeeOverdueRemindersController(req: Request, res: Response) {
+  const { sessionId } = feeOverdueBody.parse(req.body);
+  const result = await sendFeeOverdueReminders(req.auth!.tenantId!, req.auth!.userId, sessionId);
+  res.json({ data: result });
+}
+

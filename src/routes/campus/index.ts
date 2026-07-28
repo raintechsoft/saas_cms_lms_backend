@@ -56,7 +56,16 @@ import {
   createCampusNoticeController,
   deleteCampusNoticeController,
   listCampusNoticesController,
+  updateCampusNoticeController,
 } from "../../modules/portal/portal.controller.js";
+import {
+  createNotificationController,
+  getUnreadCountController,
+  listNotificationsController,
+  markAllReadController,
+  markReadController,
+  sendFeeOverdueRemindersController,
+} from "../../modules/notifications/notifications.controller.js";
 import {
   getSettingsController,
   updateSettingsController,
@@ -100,12 +109,17 @@ import {
 } from "../../modules/attendance/attendance.controller.js";
 import {
   addMarkComponentController,
+  archiveExamController,
   assignExamStudentsController,
   createExamAspectController,
   createExamController,
   createExamGradeController,
   createExamGroupController,
   createExamScheduleController,
+  deleteExamController,
+  deleteExamGradeController,
+  deleteExamGroupController,
+  deleteExamScheduleController,
   getExamResultsController,
   getExamGroupResultsController,
   getExamSetupController,
@@ -113,6 +127,10 @@ import {
   publishExamController,
   saveAspectValuesController,
   saveExamMarksController,
+  updateExamController,
+  updateExamGradeController,
+  updateExamGroupController,
+  updateExamScheduleController,
 } from "../../modules/exams/exams.controller.js";
 import {
   addStaffAdjustmentController,
@@ -219,10 +237,42 @@ campusRouter.post(
   requirePermission("settings.manage"),
   asyncHandler(createCampusNoticeController),
 );
+campusRouter.put(
+  "/notices/:id",
+  requirePermission("settings.manage"),
+  asyncHandler(updateCampusNoticeController),
+);
 campusRouter.delete(
   "/notices/:id",
   requirePermission("settings.manage"),
   asyncHandler(deleteCampusNoticeController),
+);
+
+campusRouter.get(
+  "/notifications",
+  asyncHandler(listNotificationsController),
+);
+campusRouter.get(
+  "/notifications/unread-count",
+  asyncHandler(getUnreadCountController),
+);
+campusRouter.post(
+  "/notifications",
+  requirePermission("notifications.manage"),
+  asyncHandler(createNotificationController),
+);
+campusRouter.put(
+  "/notifications/read-all",
+  asyncHandler(markAllReadController),
+);
+campusRouter.put(
+  "/notifications/:id/read",
+  asyncHandler(markReadController),
+);
+campusRouter.post(
+  "/notifications/fee-overdue",
+  requirePermission("fees.manage"),
+  asyncHandler(sendFeeOverdueRemindersController),
 );
 
 campusRouter.get(
@@ -588,20 +638,65 @@ campusRouter.post(
   requirePermission("exams.manage"),
   asyncHandler(createExamGradeController),
 );
+campusRouter.put(
+  "/exams/grades/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(updateExamGradeController),
+);
+campusRouter.delete(
+  "/exams/grades/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteExamGradeController),
+);
 campusRouter.post(
   "/exams/groups",
   requirePermission("exams.manage"),
   asyncHandler(createExamGroupController),
+);
+campusRouter.put(
+  "/exams/groups/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(updateExamGroupController),
+);
+campusRouter.delete(
+  "/exams/groups/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteExamGroupController),
 );
 campusRouter.post(
   "/exams",
   requirePermission("exams.manage"),
   asyncHandler(createExamController),
 );
+campusRouter.put(
+  "/exams/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(updateExamController),
+);
+campusRouter.put(
+  "/exams/:id/archive",
+  requirePermission("exams.manage"),
+  asyncHandler(archiveExamController),
+);
+campusRouter.delete(
+  "/exams/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteExamController),
+);
 campusRouter.post(
   "/exams/:id/schedules",
   requirePermission("exams.manage"),
   asyncHandler(createExamScheduleController),
+);
+campusRouter.put(
+  "/exams/schedules/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(updateExamScheduleController),
+);
+campusRouter.delete(
+  "/exams/schedules/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteExamScheduleController),
 );
 campusRouter.post(
   "/exams/:id/students",

@@ -54,6 +54,9 @@ const feeGroupUpdateBody = z.object({
 });
 const discountBody = z.object({
   name: z.string().trim().min(1).max(100),
+  code: z.string().trim().max(30).nullable().optional(),
+  category: z.string().trim().max(50).nullable().optional(),
+  description: z.string().trim().max(1000).nullable().optional(),
   type: z.nativeEnum(DiscountType),
   value: z.coerce.number().positive(),
 });

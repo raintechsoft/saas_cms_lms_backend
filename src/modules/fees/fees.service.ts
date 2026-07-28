@@ -100,10 +100,35 @@ function toDue(assignment: Prisma.StudentFeeAssignmentGetPayload<{
   return { ...assignment, totals: { base, discount, fine, paid, balance } };
 }
 
+async function ensureDefaultReceiptBook(tenantId: string) {
+  const existing = await prisma.feeReceiptBook.findFirst({
+    where: tenantScope(tenantId, {}),
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+  });
+  if (existing) {
+    if (!existing.isDefault) {
+      return prisma.feeReceiptBook.update({
+        where: { id: existing.id },
+        data: { isDefault: true },
+      });
+    }
+    return existing;
+  }
+  return prisma.feeReceiptBook.create({
+    data: {
+      tenantId,
+      name: "Main",
+      prefix: "RCPT-",
+      isDefault: true,
+    },
+  });
+}
+
 export async function getFeeSetup(tenantId: string) {
   const currentSession = await prisma.academicSession.findFirst({
     where: tenantScope(tenantId, { isCurrent: true }),
   });
+  await ensureDefaultReceiptBook(tenantId);
   const [types, groups, discounts, receiptBooks, classSections, masters, setting] =
     await Promise.all([
       prisma.feeType.findMany({
@@ -131,7 +156,16 @@ export async function getFeeSetup(tenantId: string) {
               section: true,
               enrollments: {
                 where: { status: "ACTIVE" },
-                include: { student: true },
+                include: {
+                  student: {
+                    select: {
+                      id: true,
+                      admissionNumber: true,
+                      firstName: true,
+                      lastName: true,
+                    },
+                  },
+                },
               },
             },
             orderBy: [
@@ -202,12 +236,29 @@ export async function createFeeGroup(
 
 export function createFeeDiscount(
   tenantId: string,
-  input: { name: string; type: DiscountType; value: number },
+  input: {
+    name: string;
+    code?: string | null;
+    category?: string | null;
+    description?: string | null;
+    type: DiscountType;
+    value: number;
+  },
 ) {
   if (input.type === DiscountType.PERCENTAGE && input.value > 100) {
     throw new AppError(400, "Percentage discount cannot exceed 100", "INVALID_DISCOUNT");
   }
-  return prisma.feeDiscount.create({ data: { tenantId, ...input } });
+  return prisma.feeDiscount.create({
+    data: {
+      tenantId,
+      name: input.name,
+      code: input.code?.trim() || null,
+      category: input.category?.trim() || null,
+      description: input.description?.trim() || null,
+      type: input.type,
+      value: input.value,
+    },
+  });
 }
 
 export async function createReceiptBook(
@@ -390,7 +441,15 @@ export async function deleteFeeGroup(tenantId: string, id: string) {
 export async function updateFeeDiscount(
   tenantId: string,
   id: string,
-  input: { name?: string; type?: DiscountType; value?: number; isActive?: boolean },
+  input: {
+    name?: string;
+    code?: string | null;
+    category?: string | null;
+    description?: string | null;
+    type?: DiscountType;
+    value?: number;
+    isActive?: boolean;
+  },
 ) {
   await requireFeeDiscount(tenantId, id);
   const type = input.type;
@@ -402,6 +461,9 @@ export async function updateFeeDiscount(
     where: { id },
     data: {
       name: input.name,
+      code: input.code === undefined ? undefined : input.code?.trim() || null,
+      category: input.category === undefined ? undefined : input.category?.trim() || null,
+      description: input.description === undefined ? undefined : input.description?.trim() || null,
       type,
       value,
       isActive: input.isActive,

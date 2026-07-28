@@ -1,6 +1,32 @@
 import "dotenv/config";
 import { z } from "zod";
 
+// Accept common Twilio env aliases (Windows/.env casing variants).
+{
+  const sid =
+    process.env.TWILIO_ACCOUNT_SID ||
+    process.env.Twilio_ACCOUNT_SID ||
+    process.env.TWILIO_SID ||
+    "";
+  const token =
+    process.env.TWILIO_AUTH_TOKEN ||
+    process.env.Twilio_AUTH_TOKEN ||
+    process.env.TWILIO_TOKEN ||
+    "";
+  const from =
+    process.env.TWILIO_FROM_NUMBER ||
+    process.env.Twilio_PHONE_NUMBER ||
+    process.env.TWILIO_PHONE_NUMBER ||
+    process.env.Twilio_FROM_NUMBER ||
+    "";
+  if (sid) process.env.TWILIO_ACCOUNT_SID = sid;
+  else delete process.env.TWILIO_ACCOUNT_SID;
+  if (token) process.env.TWILIO_AUTH_TOKEN = token;
+  else delete process.env.TWILIO_AUTH_TOKEN;
+  if (from) process.env.TWILIO_FROM_NUMBER = from;
+  else delete process.env.TWILIO_FROM_NUMBER;
+}
+
 const schema = z
   .object({
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -20,6 +46,9 @@ const schema = z
     SMTP_PASS: z.string().min(1).optional(),
     SMTP_FROM: z.string().email().default("noreply@saas-cms-lms.local"),
     SMTP_FROM_NAME: z.string().trim().min(1).max(80).default("SaaS CMS LMS"),
+    TWILIO_ACCOUNT_SID: z.string().min(1).optional(),
+    TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
+    TWILIO_FROM_NUMBER: z.string().min(1).optional(),
     GOOGLE_CLIENT_ID: z.string().min(1).optional(),
     STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
     S3_BUCKET: z.string().min(1).optional(),
@@ -47,6 +76,33 @@ const schema = z
       }
     }
 
+    const anyTwilio = Boolean(
+      value.TWILIO_ACCOUNT_SID || value.TWILIO_AUTH_TOKEN || value.TWILIO_FROM_NUMBER,
+    );
+    if (anyTwilio) {
+      if (!value.TWILIO_ACCOUNT_SID) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["TWILIO_ACCOUNT_SID"],
+          message: "TWILIO_ACCOUNT_SID is required when Twilio SMS is configured",
+        });
+      }
+      if (!value.TWILIO_AUTH_TOKEN) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["TWILIO_AUTH_TOKEN"],
+          message: "TWILIO_AUTH_TOKEN is required when Twilio SMS is configured",
+        });
+      }
+      if (!value.TWILIO_FROM_NUMBER) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["TWILIO_FROM_NUMBER"],
+          message: "TWILIO_FROM_NUMBER (or Twilio_PHONE_NUMBER) is required when Twilio SMS is configured",
+        });
+      }
+    }
+
     if (value.STORAGE_DRIVER === "s3") {
       if (!value.S3_BUCKET) {
         ctx.addIssue({ code: "custom", path: ["S3_BUCKET"], message: "S3_BUCKET is required when STORAGE_DRIVER=s3" });
@@ -69,3 +125,7 @@ const schema = z
   });
 
 export const env = schema.parse(process.env);
+
+export function isTwilioEnvConfigured() {
+  return Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER);
+}

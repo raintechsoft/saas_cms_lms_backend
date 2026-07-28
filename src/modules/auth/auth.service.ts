@@ -264,7 +264,8 @@ export async function forgotPassword(input: TenantScopedInput) {
   if (input.tenantSlug) {
     params.set("tenant", input.tenantSlug.trim().toLowerCase());
   }
-  const resetUrl = `${env.WEB_ORIGIN}/reset-password?${params.toString()}`;
+  // Frontend uses HashRouter (Electron + Vite), so deep links must include `#/`.
+  const resetUrl = `${env.WEB_ORIGIN.replace(/\/$/, "")}/#/reset-password?${params.toString()}`;
 
   const workspaceName = user.tenant?.name ?? "SaaS CMS LMS";
   const text = [

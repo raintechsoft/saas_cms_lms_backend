@@ -14,6 +14,7 @@
     "db:seed": "prisma db seed",
     "db:verify": "tsx prisma/verify.ts",
     "mail:verify": "tsx scripts/verify-mail.ts",
+    "sms:verify": "tsx scripts/verify-sms.ts",
     "storage:verify": "tsx scripts/verify-storage.ts",
     "prisma:generate": "prisma generate",
     "prisma:ensure": "tsx prisma/ensure-db.ts",

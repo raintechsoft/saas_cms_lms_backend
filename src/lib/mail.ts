@@ -1,8 +1,9 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
+import { getTenantIntegration } from "../modules/erp/erp.service.js";
 
-function createTransporter(): Transporter | null {
+function createEnvTransporter(): Transporter | null {
   if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
     return null;
   }
@@ -18,26 +19,26 @@ function createTransporter(): Transporter | null {
   });
 }
 
-const transporter = createTransporter();
+const envTransporter = createEnvTransporter();
 
-function mailFromAddress() {
-  const address = env.SMTP_FROM || env.SMTP_USER || "noreply@saas-cms-lms.local";
-  const name = env.SMTP_FROM_NAME.trim();
+function mailFromAddress(from?: string, fromName?: string) {
+  const address = from || env.SMTP_FROM || env.SMTP_USER || "noreply@saas-cms-lms.local";
+  const name = (fromName ?? env.SMTP_FROM_NAME).trim();
   return name ? { name, address } : address;
 }
 
 export function isMailConfigured() {
-  return Boolean(transporter);
+  return Boolean(envTransporter);
 }
 
 /** Checks SMTP credentials; useful at startup or via `npm run mail:verify`. */
 export async function verifyMailConnection() {
-  if (!transporter) {
+  if (!envTransporter) {
     return { ok: false as const, reason: "SMTP is not configured (set SMTP_HOST, SMTP_USER, SMTP_PASS)" };
   }
 
   try {
-    await transporter.verify();
+    await envTransporter.verify();
     return { ok: true as const };
   } catch (error) {
     const message = error instanceof Error ? error.message : "SMTP verify failed";
@@ -45,8 +46,47 @@ export async function verifyMailConnection() {
   }
 }
 
-export async function sendMail(input: { to: string; subject: string; text: string; html?: string }) {
-  if (!transporter) {
+async function resolveTransporter(tenantId?: string): Promise<{
+  transporter: Transporter | null;
+  from?: string;
+  fromName?: string;
+}> {
+  if (tenantId) {
+    const integration = await getTenantIntegration(tenantId, "EMAIL");
+    if (integration?.isEnabled) {
+      const config = (integration.config ?? {}) as Record<string, unknown>;
+      const secrets = integration.secrets ?? {};
+      const host = String(config.host ?? config.smtpHost ?? "").trim();
+      const user = String(secrets.user ?? secrets.username ?? config.user ?? "").trim();
+      const pass = String(secrets.pass ?? secrets.password ?? "").trim();
+      if (host && user && pass) {
+        const port = Number(config.port ?? config.smtpPort ?? 587);
+        const secure = Boolean(config.secure ?? port === 465);
+        return {
+          transporter: nodemailer.createTransport({
+            host,
+            port,
+            secure,
+            auth: { user, pass },
+          }),
+          from: String(config.from ?? config.fromEmail ?? user),
+          fromName: String(config.fromName ?? ""),
+        };
+      }
+    }
+  }
+  return { transporter: envTransporter };
+}
+
+export async function sendMail(input: {
+  to: string;
+  subject: string;
+  text: string;
+  html?: string;
+  tenantId?: string;
+}) {
+  const resolved = await resolveTransporter(input.tenantId);
+  if (!resolved.transporter) {
     if (env.NODE_ENV === "production") {
       throw new AppError(503, "Email delivery is not configured", "MAIL_NOT_CONFIGURED");
     }
@@ -58,8 +98,8 @@ export async function sendMail(input: { to: string; subject: string; text: strin
   }
 
   try {
-    const from = mailFromAddress();
-    const info = await transporter.sendMail({
+    const from = mailFromAddress(resolved.from, resolved.fromName);
+    const info = await resolved.transporter.sendMail({
       from,
       replyTo: typeof from === "string" ? from : from.address,
       to: input.to,

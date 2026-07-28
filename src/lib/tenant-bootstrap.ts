@@ -103,6 +103,22 @@ export async function bootstrapTenantWorkspace(tenantId: string, client: DbClien
       isCurrent: true,
     },
   });
+  const receiptBookCount = await client.feeReceiptBook.count({ where: { tenantId } });
+  if (receiptBookCount === 0) {
+    await client.feeReceiptBook.create({
+      data: {
+        tenantId,
+        name: "Main",
+        prefix: "RCPT-",
+        isDefault: true,
+      },
+    });
+  }
+  await client.tenantFeeSetting.upsert({
+    where: { tenantId },
+    update: {},
+    create: { tenantId },
+  });
 }
 
 export async function ensureInstitutionAdminRole(tenantId: string, client: DbClient = prisma) {

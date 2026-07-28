@@ -1,4 +1,4 @@
-import { env } from "./config/env.js";
+import { env, isTwilioEnvConfigured } from "./config/env.js";
 import { isMailConfigured } from "./lib/mail.js";
 import { prisma } from "./lib/prisma.js";
 import { ensureLocalUploadDirs, getStorageDriver } from "./lib/uploads.js";
@@ -12,6 +12,11 @@ const server = app.listen(env.API_PORT, () => {
     isMailConfigured()
       ? "[mail] SMTP configured — OTP and password-reset emails will be delivered"
       : "[mail] SMTP not configured — OTP/reset codes log to console in development",
+  );
+  console.log(
+    isTwilioEnvConfigured()
+      ? "[sms] Twilio env configured — fee reminders can send SMS"
+      : "[sms] Twilio env not set — use ERP SMS settings or TWILIO_* / Twilio_* in .env",
   );
   console.log(
     getStorageDriver() === "s3"
