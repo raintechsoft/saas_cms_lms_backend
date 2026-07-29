@@ -272,6 +272,8 @@ model Tenant {
   classSections          ClassSection[]
   subjects               Subject[]
   classSubjects          ClassSubject[]
+  electiveCategories     ElectiveCategory[]
+  studentElectives       StudentElectiveAssignment[]
   feeTypes               FeeType[]
   feeGroups              FeeGroup[]
   feeMasters             FeeMaster[]
@@ -593,15 +595,16 @@ model Student {
 }
 
 model AcademicClass {
-  id            String         @id @default(cuid())
-  tenantId      String         @map("tenant_id")
-  name          String
-  code          String?
-  sortOrder     Int            @default(0) @map("sort_order")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  classSections ClassSection[]
+  id                 String             @id @default(cuid())
+  tenantId           String             @map("tenant_id")
+  name               String
+  code               String?
+  sortOrder          Int                @default(0) @map("sort_order")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  classSections      ClassSection[]
+  electiveCategories ElectiveCategory[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, code])
@@ -654,21 +657,63 @@ model ClassSection {
   @@map("class_sections")
 }
 
+model ElectiveCategory {
+  id          String                      @id @default(cuid())
+  tenantId    String                      @map("tenant_id")
+  name        String
+  description String?                     @db.Text
+  classId     String?                     @map("class_id")
+  maxSelect   Int                         @default(1) @map("max_select")
+  createdAt   DateTime                    @default(now()) @map("created_at")
+  updatedAt   DateTime                    @updatedAt @map("updated_at")
+  tenant      Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicClass AcademicClass?            @relation(fields: [classId], references: [id], onDelete: SetNull)
+  subjects    Subject[]
+  assignments StudentElectiveAssignment[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, classId])
+  @@map("elective_categories")
+}
+
 model Subject {
-  id            String         @id @default(cuid())
-  tenantId      String         @map("tenant_id")
-  name          String
-  code          String?
-  type          SubjectType    @default(CORE)
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  classSubjects ClassSubject[]
+  id                 String                      @id @default(cuid())
+  tenantId           String                      @map("tenant_id")
+  name               String
+  code               String?
+  type               SubjectType                 @default(CORE)
+  electiveCategoryId String?                     @map("elective_category_id")
+  createdAt          DateTime                    @default(now()) @map("created_at")
+  updatedAt          DateTime                    @updatedAt @map("updated_at")
+  tenant             Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  electiveCategory   ElectiveCategory?           @relation(fields: [electiveCategoryId], references: [id], onDelete: SetNull)
+  classSubjects      ClassSubject[]
+  studentElectives   StudentElectiveAssignment[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, code])
   @@index([tenantId])
+  @@index([electiveCategoryId])
   @@map("subjects")
+}
+
+model StudentElectiveAssignment {
+  id                  String           @id @default(cuid())
+  tenantId            String           @map("tenant_id")
+  studentEnrollmentId String           @map("student_enrollment_id")
+  subjectId           String           @map("subject_id")
+  electiveCategoryId  String?          @map("elective_category_id")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  tenant              Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  enrollment          StudentEnrollment @relation(fields: [studentEnrollmentId], references: [id], onDelete: Cascade)
+  subject             Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  electiveCategory    ElectiveCategory? @relation(fields: [electiveCategoryId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, studentEnrollmentId, subjectId])
+  @@index([tenantId, studentEnrollmentId])
+  @@index([electiveCategoryId])
+  @@map("student_elective_assignments")
 }
 
 model ClassSubject {
@@ -712,6 +757,7 @@ model StudentEnrollment {
   attendancePoints    AttendancePoint[]
   examStudents        ExamStudent[]
   homeworkSubmissions HomeworkSubmission[]
+  electiveAssignments StudentElectiveAssignment[]
 
   @@unique([tenantId, studentId, academicSessionId, classSectionId])
   @@index([tenantId, academicSessionId, classSectionId])

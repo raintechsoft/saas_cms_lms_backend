@@ -24,14 +24,20 @@ import {
   assignSubjectController,
   createClassController,
   createClassSectionController,
+  createElectiveCategoryController,
   createSectionController,
   createSessionController,
   createSubjectController,
   deleteAcademicRecordController,
+  deleteElectiveCategoryController,
   getAcademicSetupController,
+  getElectiveAssignmentBoardController,
+  promoteStudentsController,
+  saveStudentElectivesController,
   setCurrentSessionController,
   updateClassController,
   updateClassSectionController,
+  updateElectiveCategoryController,
   updateSectionController,
   updateSubjectController,
 } from "../../modules/academics/academics.controller.js";
@@ -169,6 +175,7 @@ import {
 } from "../../modules/documents/documents.controller.js";
 import {
   getReportHubController,
+  runCoreReportController,
   runModuleReportController,
 } from "../../modules/reports/reports.controller.js";
 import {
@@ -381,6 +388,37 @@ campusRouter.delete(
   "/academics/:resource/:id",
   requirePermission("academics.manage"),
   asyncHandler(deleteAcademicRecordController),
+);
+
+campusRouter.post(
+  "/academics/promote",
+  requirePermission("academics.manage"),
+  asyncHandler(promoteStudentsController),
+);
+campusRouter.post(
+  "/academics/elective-categories",
+  requirePermission("academics.manage"),
+  asyncHandler(createElectiveCategoryController),
+);
+campusRouter.put(
+  "/academics/elective-categories/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateElectiveCategoryController),
+);
+campusRouter.delete(
+  "/academics/elective-categories/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(deleteElectiveCategoryController),
+);
+campusRouter.get(
+  "/academics/electives/board",
+  requirePermission("academics.view"),
+  asyncHandler(getElectiveAssignmentBoardController),
+);
+campusRouter.put(
+  "/academics/electives/assignments",
+  requirePermission("academics.manage"),
+  asyncHandler(saveStudentElectivesController),
 );
 
 campusRouter.get(
@@ -935,6 +973,11 @@ campusRouter.get(
   "/reports",
   requirePermission("reports.view"),
   asyncHandler(getReportHubController),
+);
+campusRouter.get(
+  "/reports/core/:reportKey",
+  requirePermission("reports.view"),
+  asyncHandler(runCoreReportController),
 );
 campusRouter.get(
   "/reports/:module",
