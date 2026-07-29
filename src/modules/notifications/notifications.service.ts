@@ -90,6 +90,132 @@ export async function sendPushToUser(
   return { delivered, failed };
 }
 
+async function collectAudienceUserIds(
+  tenantId: string,
+  audience: NoticeAudience,
+  options?: { classSectionId?: string | null; targetUserId?: string | null },
+) {
+  if (options?.targetUserId) return [options.targetUserId];
+
+  const userIds = new Set<string>();
+
+  if (options?.classSectionId) {
+    const enrollments = await prisma.studentEnrollment.findMany({
+      where: tenantScope(tenantId, {
+        classSectionId: options.classSectionId,
+        status: EnrollmentStatus.ACTIVE,
+      }),
+      select: {
+        student: {
+          select: {
+            userId: true,
+            guardians: {
+              select: {
+                userId: true,
+                user: { select: { status: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (const row of enrollments) {
+      if (
+        (audience === NoticeAudience.STUDENTS || audience === NoticeAudience.ALL) &&
+        row.student.userId
+      ) {
+        userIds.add(row.student.userId);
+      }
+      if (audience === NoticeAudience.PARENTS || audience === NoticeAudience.ALL) {
+        for (const link of row.student.guardians) {
+          if (link.user.status === UserStatus.ACTIVE) userIds.add(link.userId);
+        }
+      }
+    }
+    return [...userIds];
+  }
+
+  if (audience === NoticeAudience.STUDENTS || audience === NoticeAudience.ALL) {
+    const studentUsers = await prisma.userRole.findMany({
+      where: tenantScope(tenantId, {
+        role: { code: "STUDENT" },
+        user: { status: UserStatus.ACTIVE },
+      }),
+      select: { userId: true },
+    });
+    for (const row of studentUsers) userIds.add(row.userId);
+  }
+
+  if (audience === NoticeAudience.PARENTS || audience === NoticeAudience.ALL) {
+    const parentUsers = await prisma.userRole.findMany({
+      where: tenantScope(tenantId, {
+        role: { code: "PARENT" },
+        user: { status: UserStatus.ACTIVE },
+      }),
+      select: { userId: true },
+    });
+    for (const row of parentUsers) userIds.add(row.userId);
+  }
+
+  if (audience === NoticeAudience.ALL) {
+    const users = await prisma.user.findMany({
+      where: tenantScope(tenantId, { status: UserStatus.ACTIVE }),
+      select: { id: true },
+    });
+    for (const row of users) userIds.add(row.id);
+  }
+
+  return [...userIds];
+}
+
+function pushClickUrlForAudience(audience: NoticeAudience) {
+  if (audience === NoticeAudience.PARENTS) {
+    return `${env.WEB_ORIGIN}/#/portal/parent/notifications`;
+  }
+  if (audience === NoticeAudience.STUDENTS) {
+    return `${env.WEB_ORIGIN}/#/portal/student/notifications`;
+  }
+  return `${env.WEB_ORIGIN}/#/portal`;
+}
+
+export async function sendPushToAudience(
+  tenantId: string,
+  audience: NoticeAudience,
+  payload: { title: string; body: string; type?: string; url?: string },
+  options?: { classSectionId?: string | null; targetUserId?: string | null },
+) {
+  if (!isPushConfigured()) return { delivered: 0, failed: 0, recipients: 0 };
+
+  const userIds = await collectAudienceUserIds(tenantId, audience, options);
+  if (!userIds.length) return { delivered: 0, failed: 0, recipients: 0 };
+
+  const subscriptions = await prisma.pushSubscription.findMany({
+    where: { tenantId, userId: { in: userIds } },
+    select: { id: true, endpoint: true, p256dh: true, auth: true },
+  });
+  if (!subscriptions.length) return { delivered: 0, failed: 0, recipients: userIds.length };
+
+  let delivered = 0;
+  let failed = 0;
+  for (const sub of subscriptions) {
+    const result = await sendWebPush(sub, {
+      ...payload,
+      url: payload.url ?? pushClickUrlForAudience(audience),
+    });
+    if (result.delivered) {
+      delivered += 1;
+      continue;
+    }
+    failed += 1;
+    if (result.statusCode === 404 || result.statusCode === 410) {
+      await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
+    }
+  }
+
+  return { delivered, failed, recipients: userIds.length };
+}
+
 export async function listNotifications(
   tenantId: string,
   userId: string,
@@ -292,21 +418,37 @@ export async function createNotification(
     },
   });
 
-  if (notification.targetUserId && isPushConfigured()) {
-    await sendPushToUser(tenantId, notification.targetUserId, {
-      title,
-      body,
-      type: notification.type,
-      url: `${env.WEB_ORIGIN}/#/notifications`,
-    }).catch((error) => {
+  const audience = input.audience ?? NoticeAudience.ALL;
+  let pushResult = { delivered: 0, failed: 0, recipients: 0 };
+  if (isPushConfigured()) {
+    try {
+      pushResult = await sendPushToAudience(
+        tenantId,
+        audience,
+        {
+          title,
+          body,
+          type: notification.type,
+          url: pushClickUrlForAudience(audience),
+        },
+        {
+          classSectionId: input.classSectionId,
+          targetUserId: input.targetUserId,
+        },
+      );
+      console.info(
+        `[notifications] Push "${title}" delivered=${pushResult.delivered} failed=${pushResult.failed} recipients=${pushResult.recipients}`,
+      );
+    } catch (error) {
       const message = error instanceof Error ? error.message : "push send failed";
-      console.error(`[notifications] Push send failed: ${message}`);
-    });
+      console.error(`[notifications] Push broadcast failed: ${message}`);
+    }
   }
 
-  if (!input.sendEmail) return notification;
+  if (!input.sendEmail) {
+    return { ...notification, pushSent: pushResult.delivered, pushFailed: pushResult.failed };
+  }
 
-  const audience = input.audience ?? NoticeAudience.ALL;
   const recipientEmails = await collectAudienceEmails(tenantId, audience, {
     classSectionId: input.classSectionId,
     targetUserId: input.targetUserId,
@@ -332,12 +474,15 @@ export async function createNotification(
     }
   }
 
-  if (!anyDelivered) return notification;
+  if (!anyDelivered) {
+    return { ...notification, pushSent: pushResult.delivered, pushFailed: pushResult.failed };
+  }
 
-  return prisma.notification.update({
+  const updated = await prisma.notification.update({
     where: { id: notification.id },
     data: { emailSent: true, sentAt: new Date() },
   });
+  return { ...updated, pushSent: pushResult.delivered, pushFailed: pushResult.failed };
 }
 
 export async function markRead(
@@ -403,11 +548,18 @@ export async function sendPushTestNotification(tenantId: string, userId: string)
       "PUSH_NOT_CONFIGURED",
     );
   }
+  const roleCodes = await getUserRoleCodes(tenantId, userId);
+  const url = roleCodes.includes("PARENT")
+    ? `${env.WEB_ORIGIN}/#/portal/parent/notifications`
+    : roleCodes.includes("STUDENT")
+      ? `${env.WEB_ORIGIN}/#/portal/student/notifications`
+      : `${env.WEB_ORIGIN}/#/notifications`;
+
   return sendPushToUser(tenantId, userId, {
     title: "Push notifications enabled",
     body: "This is a test push from SaaS CMS LMS.",
     type: "ANNOUNCEMENT",
-    url: `${env.WEB_ORIGIN}/#/notifications`,
+    url,
   });
 }
 

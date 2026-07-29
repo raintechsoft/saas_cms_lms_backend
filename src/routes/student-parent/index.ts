@@ -19,12 +19,22 @@ import {
   updatePortalStudentProfileController,
   uploadPortalStudentPhotoController,
 } from "../../modules/portal/portal.controller.js";
+import {
+  getUnreadCountController,
+  listNotificationsController,
+  markAllReadController,
+  markReadController,
+} from "../../modules/notifications/notifications.controller.js";
 
 export const portalRouter = Router();
 
 portalRouter.use(authenticate, requireTenant);
 portalRouter.get("/overview", asyncHandler(getPortalOverviewController));
 portalRouter.get("/notices", asyncHandler(listPortalNoticesController));
+portalRouter.get("/notifications", asyncHandler(listNotificationsController));
+portalRouter.get("/notifications/unread-count", asyncHandler(getUnreadCountController));
+portalRouter.put("/notifications/read-all", asyncHandler(markAllReadController));
+portalRouter.put("/notifications/:id/read", asyncHandler(markReadController));
 portalRouter.get("/children/:studentId/attendance", asyncHandler(getPortalAttendanceController));
 portalRouter.get("/children/:studentId/leaves", asyncHandler(getPortalLeavesController));
 portalRouter.post("/children/:studentId/leaves", asyncHandler(createPortalLeaveController));
