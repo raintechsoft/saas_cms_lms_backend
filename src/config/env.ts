@@ -1,30 +1,43 @@
 import "dotenv/config";
 import { z } from "zod";
 
-// Accept common Twilio env aliases (Windows/.env casing variants).
+// Accept common MSG91 env aliases (Windows/.env casing variants).
 {
-  const sid =
-    process.env.TWILIO_ACCOUNT_SID ||
-    process.env.Twilio_ACCOUNT_SID ||
-    process.env.TWILIO_SID ||
+  const authKey =
+    process.env.MSG91_AUTH_KEY ||
+    process.env.Msg91_AUTH_KEY ||
+    process.env.MSG91_AUTHKEY ||
+    process.env.MSG91_API_KEY ||
     "";
-  const token =
-    process.env.TWILIO_AUTH_TOKEN ||
-    process.env.Twilio_AUTH_TOKEN ||
-    process.env.TWILIO_TOKEN ||
+  const senderId =
+    process.env.MSG91_SENDER_ID ||
+    process.env.Msg91_SENDER_ID ||
+    process.env.MSG91_SENDER ||
     "";
-  const from =
-    process.env.TWILIO_FROM_NUMBER ||
-    process.env.Twilio_PHONE_NUMBER ||
-    process.env.TWILIO_PHONE_NUMBER ||
-    process.env.Twilio_FROM_NUMBER ||
+  const templateId =
+    process.env.MSG91_TEMPLATE_ID ||
+    process.env.Msg91_TEMPLATE_ID ||
+    process.env.MSG91_FLOW_ID ||
     "";
-  if (sid) process.env.TWILIO_ACCOUNT_SID = sid;
-  else delete process.env.TWILIO_ACCOUNT_SID;
-  if (token) process.env.TWILIO_AUTH_TOKEN = token;
-  else delete process.env.TWILIO_AUTH_TOKEN;
-  if (from) process.env.TWILIO_FROM_NUMBER = from;
-  else delete process.env.TWILIO_FROM_NUMBER;
+  const widgetId =
+    process.env.MSG91_WIDGET_ID ||
+    process.env.Msg91_WIDGET_ID ||
+    "";
+  const tokenAuth =
+    process.env.MSG91_TOKEN_AUTH ||
+    process.env.Msg91_TOKEN_AUTH ||
+    process.env.MSG91_WIDGET_TOKEN ||
+    "";
+  if (authKey) process.env.MSG91_AUTH_KEY = authKey;
+  else delete process.env.MSG91_AUTH_KEY;
+  if (senderId) process.env.MSG91_SENDER_ID = senderId;
+  else delete process.env.MSG91_SENDER_ID;
+  if (templateId) process.env.MSG91_TEMPLATE_ID = templateId;
+  else delete process.env.MSG91_TEMPLATE_ID;
+  if (widgetId) process.env.MSG91_WIDGET_ID = widgetId;
+  else delete process.env.MSG91_WIDGET_ID;
+  if (tokenAuth) process.env.MSG91_TOKEN_AUTH = tokenAuth;
+  else delete process.env.MSG91_TOKEN_AUTH;
 }
 
 const schema = z
@@ -46,9 +59,11 @@ const schema = z
     SMTP_PASS: z.string().min(1).optional(),
     SMTP_FROM: z.string().email().default("noreply@saas-cms-lms.local"),
     SMTP_FROM_NAME: z.string().trim().min(1).max(80).default("SaaS CMS LMS"),
-    TWILIO_ACCOUNT_SID: z.string().min(1).optional(),
-    TWILIO_AUTH_TOKEN: z.string().min(1).optional(),
-    TWILIO_FROM_NUMBER: z.string().min(1).optional(),
+    MSG91_AUTH_KEY: z.string().min(1).optional(),
+    MSG91_SENDER_ID: z.string().min(1).optional(),
+    MSG91_TEMPLATE_ID: z.string().min(1).optional(),
+    MSG91_WIDGET_ID: z.string().min(1).optional(),
+    MSG91_TOKEN_AUTH: z.string().min(1).optional(),
     PUSH_VAPID_PUBLIC_KEY: z.string().min(1).optional(),
     PUSH_VAPID_PRIVATE_KEY: z.string().min(1).optional(),
     PUSH_CONTACT_EMAIL: z.string().email().optional(),
@@ -79,29 +94,46 @@ const schema = z
       }
     }
 
-    const anyTwilio = Boolean(
-      value.TWILIO_ACCOUNT_SID || value.TWILIO_AUTH_TOKEN || value.TWILIO_FROM_NUMBER,
-    );
-    if (anyTwilio) {
-      if (!value.TWILIO_ACCOUNT_SID) {
+    // SMS sending needs auth key + sender. OTP widget can use auth key without sender.
+    const anyMsg91Sms = Boolean(value.MSG91_SENDER_ID || value.MSG91_TEMPLATE_ID);
+    if (anyMsg91Sms) {
+      if (!value.MSG91_AUTH_KEY) {
         ctx.addIssue({
           code: "custom",
-          path: ["TWILIO_ACCOUNT_SID"],
-          message: "TWILIO_ACCOUNT_SID is required when Twilio SMS is configured",
+          path: ["MSG91_AUTH_KEY"],
+          message: "MSG91_AUTH_KEY is required when MSG91 SMS is configured",
         });
       }
-      if (!value.TWILIO_AUTH_TOKEN) {
+      if (!value.MSG91_SENDER_ID) {
         ctx.addIssue({
           code: "custom",
-          path: ["TWILIO_AUTH_TOKEN"],
-          message: "TWILIO_AUTH_TOKEN is required when Twilio SMS is configured",
+          path: ["MSG91_SENDER_ID"],
+          message: "MSG91_SENDER_ID is required when MSG91 SMS is configured",
         });
       }
-      if (!value.TWILIO_FROM_NUMBER) {
+    }
+
+    const anyMsg91Otp = Boolean(value.MSG91_WIDGET_ID || value.MSG91_TOKEN_AUTH);
+    if (anyMsg91Otp) {
+      if (!value.MSG91_AUTH_KEY) {
         ctx.addIssue({
           code: "custom",
-          path: ["TWILIO_FROM_NUMBER"],
-          message: "TWILIO_FROM_NUMBER (or Twilio_PHONE_NUMBER) is required when Twilio SMS is configured",
+          path: ["MSG91_AUTH_KEY"],
+          message: "MSG91_AUTH_KEY is required when MSG91 OTP widget is configured",
+        });
+      }
+      if (!value.MSG91_WIDGET_ID) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["MSG91_WIDGET_ID"],
+          message: "MSG91_WIDGET_ID is required when MSG91 OTP widget is configured",
+        });
+      }
+      if (!value.MSG91_TOKEN_AUTH) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["MSG91_TOKEN_AUTH"],
+          message: "MSG91_TOKEN_AUTH is required when MSG91 OTP widget is configured",
         });
       }
     }
@@ -156,8 +188,12 @@ const schema = z
 
 export const env = schema.parse(process.env);
 
-export function isTwilioEnvConfigured() {
-  return Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM_NUMBER);
+export function isMsg91EnvConfigured() {
+  return Boolean(env.MSG91_AUTH_KEY && env.MSG91_SENDER_ID);
+}
+
+export function isMsg91OtpWidgetConfigured() {
+  return Boolean(env.MSG91_AUTH_KEY && env.MSG91_WIDGET_ID && env.MSG91_TOKEN_AUTH);
 }
 
 export function isPushEnvConfigured() {

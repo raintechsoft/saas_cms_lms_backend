@@ -8,6 +8,7 @@ import {
   getCurrentUser,
   login,
   loginWithGoogle,
+  loginWithMsg91Otp,
   requestLoginOtp,
   resetPassword,
   updateOwnAvatar,
@@ -39,6 +40,11 @@ const resetPasswordSchema = z.object({
 
 const googleLoginSchema = z.object({
   idToken: z.string().min(20),
+  tenantSlug: z.string().min(2).max(100).optional(),
+});
+
+const msg91OtpLoginSchema = z.object({
+  accessToken: z.string().min(20),
   tenantSlug: z.string().min(2).max(100).optional(),
 });
 
@@ -109,5 +115,11 @@ export async function resetPasswordController(req: Request, res: Response) {
 export async function googleLoginController(req: Request, res: Response) {
   const input = googleLoginSchema.parse(req.body);
   const result = await loginWithGoogle(input);
+  res.json({ data: result });
+}
+
+export async function msg91OtpLoginController(req: Request, res: Response) {
+  const input = msg91OtpLoginSchema.parse(req.body);
+  const result = await loginWithMsg91Otp(input);
   res.json({ data: result });
 }

@@ -1,4 +1,4 @@
-import { env, isPushEnvConfigured, isTwilioEnvConfigured } from "./config/env.js";
+import { env, isMsg91EnvConfigured, isPushEnvConfigured } from "./config/env.js";
 import { isMailConfigured } from "./lib/mail.js";
 import { prisma } from "./lib/prisma.js";
 import { ensureLocalUploadDirs, getStorageDriver } from "./lib/uploads.js";
@@ -17,9 +17,9 @@ const server = app.listen(env.API_PORT, () => {
       : "[mail] SMTP not configured — OTP/reset codes log to console in development",
   );
   console.log(
-    isTwilioEnvConfigured()
-      ? "[sms] Twilio env configured — fee reminders can send SMS"
-      : "[sms] Twilio env not set — use ERP SMS settings or TWILIO_* / Twilio_* in .env",
+    isMsg91EnvConfigured()
+      ? "[sms] MSG91 env configured — fee reminders can send SMS"
+      : "[sms] MSG91 env not set — use ERP SMS settings or MSG91_* in .env",
   );
   console.log(
     getStorageDriver() === "s3"

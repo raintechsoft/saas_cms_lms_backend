@@ -210,6 +210,7 @@ async function main() {
       passwordHash: await bcrypt.hash(demoAdminPassword, passwordRounds),
       firstName: "Demo",
       lastName: "Administrator",
+      phone: "+918086136588",
     },
     create: {
       tenantId: demoTenant.id,
@@ -217,6 +218,7 @@ async function main() {
       passwordHash: await bcrypt.hash(demoAdminPassword, passwordRounds),
       firstName: "Demo",
       lastName: "Administrator",
+      phone: "+918086136588",
     },
   });
 

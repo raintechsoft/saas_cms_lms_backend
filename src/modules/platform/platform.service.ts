@@ -9,6 +9,7 @@ import {
 } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
+import { normalizeSmsNumber } from "../../lib/sms.js";
 import { ensureTenantRoles, bootstrapTenantWorkspace, ensureInstitutionAdminRole } from "../../lib/tenant-bootstrap.js";
 import { normalizeProductMode } from "../tenants/tenant.service.js";
 
@@ -199,6 +200,7 @@ interface CreateTenantInput {
   resellerId?: string | null;
   branding?: JsonObject;
   adminEmail: string;
+  adminPhone: string;
   adminPassword?: string;
   adminFirstName?: string;
   adminLastName?: string;
@@ -233,14 +235,19 @@ export async function createTenant(input: CreateTenantInput) {
     await ensureTenantRoles(tenant.id, tx);
     await bootstrapTenantWorkspace(tenant.id, tx);
 
-    let admin: { email: string; temporaryPassword?: string } | null = null;
+    let admin: { email: string; phone: string; temporaryPassword?: string } | null = null;
     const email = input.adminEmail.trim().toLowerCase();
+    const phone = normalizeSmsNumber(input.adminPhone);
+    if (!phone || phone.replace(/\D/g, "").length < 10) {
+      throw new AppError(400, "A valid mobile number is required for the institution admin", "ADMIN_PHONE_REQUIRED");
+    }
     const role = await ensureInstitutionAdminRole(tenant.id, tx);
     const password = input.adminPassword?.trim() || "ChangeMe123!";
     const user = await tx.user.create({
       data: {
         tenantId: tenant.id,
         email,
+        phone,
         passwordHash: await bcrypt.hash(password, PASSWORD_ROUNDS),
         firstName: input.adminFirstName?.trim() || "Institution",
         lastName: input.adminLastName?.trim() || "Administrator",
@@ -249,7 +256,7 @@ export async function createTenant(input: CreateTenantInput) {
     await tx.userRole.create({
       data: { userId: user.id, roleId: role.id, tenantId: tenant.id },
     });
-    admin = { email, temporaryPassword: input.adminPassword ? undefined : password };
+    admin = { email, phone, temporaryPassword: input.adminPassword ? undefined : password };
 
     return { tenant, admin };
   });

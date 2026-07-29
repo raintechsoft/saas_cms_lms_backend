@@ -40,6 +40,12 @@ const createTenantBody = z.object({
   resellerId: z.string().min(1).nullable().optional(),
   branding: brandingSchema.optional(),
   adminEmail: z.string().email().max(200),
+  adminPhone: z
+    .string()
+    .trim()
+    .min(10)
+    .max(20)
+    .refine((value) => value.replace(/\D/g, "").length >= 10, "Mobile number is required"),
   adminPassword: z.string().min(8).max(200).optional(),
   adminFirstName: z.string().trim().max(80).optional(),
   adminLastName: z.string().trim().max(80).optional(),

@@ -1,4 +1,4 @@
-import { env, isTwilioEnvConfigured } from "../config/env.js";
+import { env, isMsg91EnvConfigured } from "../config/env.js";
 import { AppError } from "./errors.js";
 import { getTenantIntegration } from "../modules/erp/erp.service.js";
 
@@ -6,7 +6,7 @@ function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** Normalize common Indian/local numbers to E.164 for Twilio. */
+/** Normalize to E.164 (+91XXXXXXXXXX) for storage/display. */
 export function normalizeSmsNumber(raw: string) {
   let value = raw.trim().replace(/[\s()-]/g, "");
   if (!value) return "";
@@ -17,12 +17,25 @@ export function normalizeSmsNumber(raw: string) {
   return value.startsWith("+") ? value : `+${value}`;
 }
 
-async function resolveTwilioCredentials(tenantId: string) {
-  const envCreds = isTwilioEnvConfigured()
+/** MSG91 expects digits with country code, no "+". */
+export function toMsg91Mobile(raw: string) {
+  const e164 = normalizeSmsNumber(raw);
+  return e164.replace(/^\+/, "");
+}
+
+type Msg91Credentials = {
+  authKey: string;
+  senderId: string;
+  templateId: string;
+  source: "env" | "erp";
+};
+
+async function resolveMsg91Credentials(tenantId: string): Promise<Msg91Credentials | null> {
+  const envCreds = isMsg91EnvConfigured()
     ? {
-        accountSid: env.TWILIO_ACCOUNT_SID!,
-        authToken: env.TWILIO_AUTH_TOKEN!,
-        fromNumber: normalizeSmsNumber(env.TWILIO_FROM_NUMBER!),
+        authKey: env.MSG91_AUTH_KEY!,
+        senderId: env.MSG91_SENDER_ID!,
+        templateId: env.MSG91_TEMPLATE_ID ?? "",
         source: "env" as const,
       }
     : null;
@@ -31,23 +44,22 @@ async function resolveTwilioCredentials(tenantId: string) {
   if (integration?.isEnabled) {
     const config = (integration.config ?? {}) as Record<string, unknown>;
     const secrets = integration.secrets ?? {};
-    const accountSid = asString(
-      secrets.accountSid ?? secrets.sid ?? config.accountSid ?? config.sid,
+    const authKey = asString(
+      secrets.authKey ?? secrets.authkey ?? secrets.apiKey ?? config.authKey ?? config.authkey,
     );
-    const authToken = asString(
-      secrets.authToken ?? secrets.token ?? config.authToken ?? config.token,
+    const senderId = asString(
+      config.senderId ?? config.sender ?? secrets.senderId ?? secrets.sender,
+    ).toUpperCase();
+    const templateId = asString(
+      config.templateId ?? config.flowId ?? config.template_id ?? config.flow_id ?? secrets.templateId,
     );
-    const fromNumber = normalizeSmsNumber(
-      asString(config.fromNumber ?? config.from ?? secrets.fromNumber ?? secrets.from),
-    );
-    // Twilio Account SIDs start with "AC". Skip bad ERP values so .env can be used.
-    const looksValid = accountSid.startsWith("AC") && authToken.length > 10 && Boolean(fromNumber);
+    const looksValid = authKey.length >= 16 && senderId.length >= 3;
     if (looksValid) {
-      return { accountSid, authToken, fromNumber, source: "erp" as const };
+      return { authKey, senderId, templateId, source: "erp" };
     }
-    if (accountSid || authToken || fromNumber) {
+    if (authKey || senderId || templateId) {
       console.warn(
-        "[sms] ERP SMS is enabled but credentials look invalid (Account SID should start with AC). Falling back to .env if set.",
+        "[sms] ERP SMS is enabled but MSG91 credentials look invalid. Falling back to .env if set.",
       );
     }
   }
@@ -56,7 +68,59 @@ async function resolveTwilioCredentials(tenantId: string) {
 }
 
 export function isSmsConfigured() {
-  return isTwilioEnvConfigured();
+  return isMsg91EnvConfigured();
+}
+
+async function sendViaFlow(input: {
+  authKey: string;
+  senderId: string;
+  templateId: string;
+  mobile: string;
+  body: string;
+}) {
+  const response = await fetch("https://control.msg91.com/api/v5/flow/", {
+    method: "POST",
+    headers: {
+      authkey: input.authKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      template_id: input.templateId,
+      sender: input.senderId,
+      short_url: "0",
+      recipients: [
+        {
+          mobiles: input.mobile,
+          // Common DLT template placeholders — map message body into VAR1
+          VAR1: input.body,
+          var: input.body,
+        },
+      ],
+    }),
+  });
+  const text = await response.text();
+  return { ok: response.ok, status: response.status, text };
+}
+
+async function sendViaHttp(input: {
+  authKey: string;
+  senderId: string;
+  mobile: string;
+  body: string;
+}) {
+  const url = new URL("https://api.msg91.com/api/sendhttp.php");
+  url.searchParams.set("authkey", input.authKey);
+  url.searchParams.set("mobiles", input.mobile);
+  url.searchParams.set("message", input.body);
+  url.searchParams.set("sender", input.senderId);
+  url.searchParams.set("route", "4");
+  url.searchParams.set("country", "91");
+
+  const response = await fetch(url, { method: "GET" });
+  const text = await response.text();
+  // sendhttp returns a request id (digits) on success, or an error string
+  const ok = response.ok && /^\d+$/.test(text.trim());
+  return { ok, status: response.status, text };
 }
 
 export async function sendSms(input: {
@@ -65,41 +129,34 @@ export async function sendSms(input: {
   body: string;
 }) {
   const to = normalizeSmsNumber(input.to);
+  const mobile = toMsg91Mobile(input.to);
   const body = input.body.trim();
 
-  if (!to) {
+  if (!to || !mobile) {
     throw new AppError(400, "SMS phone number is empty", "SMS_INVALID_TO");
   }
 
-  const credentials = await resolveTwilioCredentials(input.tenantId);
+  const credentials = await resolveMsg91Credentials(input.tenantId);
   if (!credentials) {
     if (env.NODE_ENV === "production") {
       throw new AppError(503, "SMS delivery is not configured", "SMS_NOT_CONFIGURED");
     }
-    console.info("[sms] Twilio not configured (ERP SMS or TWILIO_* env) — delivery skipped");
+    console.info("[sms] MSG91 not configured (ERP SMS or MSG91_* env) — delivery skipped");
     console.info(`[sms] To: ${to}`);
     console.info(`[sms] Body: ${body}`);
     return { delivered: false as const };
   }
 
-  const { accountSid, authToken, fromNumber, source } = credentials;
-  const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
-  const response = await fetch(
-    `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${auth}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ To: to, From: fromNumber, Body: body }),
-    },
-  );
-  if (!response.ok) {
-    const text = await response.text();
-    console.error(`[sms] Twilio failed to=${to} source=${source}: ${text}`);
+  const { authKey, senderId, templateId, source } = credentials;
+  const result = templateId
+    ? await sendViaFlow({ authKey, senderId, templateId, mobile, body })
+    : await sendViaHttp({ authKey, senderId, mobile, body });
+
+  if (!result.ok) {
+    console.error(`[sms] MSG91 failed to=${mobile} source=${source}: ${result.text}`);
     throw new AppError(502, "Failed to send SMS", "SMS_SEND_FAILED");
   }
-  console.info(`[sms] Delivered to ${to} (via ${source})`);
+
+  console.info(`[sms] Delivered to ${mobile} via MSG91 (${source}${templateId ? ", flow" : ", http"})`);
   return { delivered: true as const };
 }

@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt, { type SignOptions } from "jsonwebtoken";
 import { AuthVerificationPurpose, TenantStatus, UserStatus, type Prisma } from "@prisma/client";
-import { env } from "../../config/env.js";
+import { env, isMsg91OtpWidgetConfigured } from "../../config/env.js";
 import {
   AUTH_CODE_TTL,
   consumeAuthVerification,
@@ -17,6 +17,7 @@ import {
   resetPasswordEmailHtml,
   sendMail,
 } from "../../lib/mail.js";
+import { normalizeSmsNumber, toMsg91Mobile } from "../../lib/sms.js";
 import { prisma } from "../../lib/prisma.js";
 import type { AuthContext } from "../../types/express.js";
 
@@ -241,6 +242,115 @@ export async function verifyLoginOtp(input: TenantScopedInput & { code: string }
   return buildLoginResult(user);
 }
 
+async function verifyMsg91WidgetAccessToken(accessToken: string) {
+  if (!env.MSG91_AUTH_KEY) {
+    throw new AppError(503, "MSG91 OTP is not configured", "MSG91_OTP_NOT_CONFIGURED");
+  }
+
+  const response = await fetch("https://control.msg91.com/api/v5/widget/verifyAccessToken", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      authkey: env.MSG91_AUTH_KEY,
+    },
+    body: JSON.stringify({
+      authkey: env.MSG91_AUTH_KEY,
+      "access-token": accessToken,
+    }),
+  });
+
+  const text = await response.text();
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    payload = { raw: text };
+  }
+
+  if (!response.ok) {
+    console.error(`[auth] MSG91 verifyAccessToken failed: ${text}`);
+    throw new AppError(401, "MSG91 OTP verification failed", "MSG91_OTP_INVALID");
+  }
+
+  const type = String(payload.type ?? payload.status ?? "").toLowerCase();
+  if (type && type !== "success" && type !== "ok") {
+    console.error(`[auth] MSG91 verifyAccessToken rejected: ${text}`);
+    throw new AppError(401, "MSG91 OTP verification failed", "MSG91_OTP_INVALID");
+  }
+
+  const message = payload.message;
+  const data = payload.data;
+  let identifier = "";
+  if (typeof message === "string") identifier = message.trim();
+  else if (message && typeof message === "object") {
+    const record = message as Record<string, unknown>;
+    identifier = String(record.mobile ?? record.phone ?? record.email ?? record.identifier ?? "").trim();
+  }
+  if (!identifier && data && typeof data === "object") {
+    const record = data as Record<string, unknown>;
+    identifier = String(record.mobile ?? record.phone ?? record.email ?? record.identifier ?? "").trim();
+  }
+  if (!identifier) {
+    throw new AppError(401, "MSG91 did not return a verified identity", "MSG91_OTP_INVALID");
+  }
+
+  return identifier;
+}
+
+async function findActiveUserByPhoneOrEmail(identifier: string, tenantSlug?: string) {
+  const tenant = await resolveTenant(tenantSlug);
+  if (tenantSlug && !tenant) {
+    throw new AppError(401, "Invalid credentials", "INVALID_CREDENTIALS");
+  }
+
+  const looksEmail = identifier.includes("@");
+  if (looksEmail) {
+    return findActiveUser(identifier, tenantSlug);
+  }
+
+  const mobile = toMsg91Mobile(identifier);
+  const e164 = normalizeSmsNumber(identifier);
+  const last10 = mobile.replace(/\D/g, "").slice(-10);
+  const phoneVariants = [...new Set([identifier, mobile, e164, `+${mobile}`, last10, `91${last10}`, `+91${last10}`].filter(Boolean))];
+
+  const user = await prisma.user.findFirst({
+    where: {
+      status: UserStatus.ACTIVE,
+      ...(tenant ? { tenantId: tenant.id } : { tenantId: null }),
+      OR: [
+        ...phoneVariants.map((phone) => ({ phone })),
+        ...(last10.length === 10
+          ? [{ phone: { endsWith: last10 } }, { phone: { contains: last10 } }]
+          : []),
+      ],
+    },
+    include: userInclude,
+  });
+
+  if (!user || (user.tenant && user.tenant.status !== TenantStatus.ACTIVE)) {
+    return null;
+  }
+  return user;
+}
+
+export async function loginWithMsg91Otp(input: { accessToken: string; tenantSlug?: string }) {
+  if (!isMsg91OtpWidgetConfigured()) {
+    throw new AppError(503, "MSG91 OTP widget is not configured", "MSG91_OTP_NOT_CONFIGURED");
+  }
+
+  const identifier = await verifyMsg91WidgetAccessToken(input.accessToken.trim());
+  const user = await findActiveUserByPhoneOrEmail(identifier, input.tenantSlug);
+  if (!user) {
+    throw new AppError(
+      401,
+      "No account is linked to this verified mobile/email for the selected workspace",
+      "MSG91_ACCOUNT_NOT_FOUND",
+    );
+  }
+
+  return buildLoginResult(user);
+}
+
 export async function forgotPassword(input: TenantScopedInput) {
   const user = await findActiveUser(input.email, input.tenantSlug);
   const genericMessage = "If the account exists, password reset instructions were sent to your email.";
@@ -379,6 +489,13 @@ export function getAuthPublicConfig() {
   return {
     googleClientId: env.GOOGLE_CLIENT_ID ?? null,
     mailConfigured: isMailConfigured(),
+    msg91Otp:
+      isMsg91OtpWidgetConfigured()
+        ? {
+            widgetId: env.MSG91_WIDGET_ID!,
+            tokenAuth: env.MSG91_TOKEN_AUTH!,
+          }
+        : null,
   };
 }
 

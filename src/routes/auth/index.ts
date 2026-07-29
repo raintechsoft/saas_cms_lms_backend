@@ -8,6 +8,7 @@ import {
   googleLoginController,
   loginController,
   meController,
+  msg91OtpLoginController,
   requestOtpController,
   resetPasswordController,
   updateProfileController,
@@ -22,6 +23,7 @@ authRouter.get("/auth/config", asyncHandler(authConfigController));
 authRouter.post("/auth/login", asyncHandler(loginController));
 authRouter.post("/auth/otp/request", asyncHandler(requestOtpController));
 authRouter.post("/auth/otp/verify", asyncHandler(verifyOtpController));
+authRouter.post("/auth/otp/msg91", asyncHandler(msg91OtpLoginController));
 authRouter.post("/auth/forgot-password", asyncHandler(forgotPasswordController));
 authRouter.post("/auth/reset-password", asyncHandler(resetPasswordController));
 authRouter.post("/auth/google", asyncHandler(googleLoginController));

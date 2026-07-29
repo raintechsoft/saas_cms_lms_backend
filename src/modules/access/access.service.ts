@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { UserStatus } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
+import { normalizeSmsNumber } from "../../lib/sms.js";
 import { ensureTenantRoles } from "../../lib/tenant-bootstrap.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 
@@ -171,6 +172,10 @@ export async function getUser(tenantId: string, userId: string) {
 
 export async function createUser(tenantId: string, input: UserInput) {
   const email = input.email.trim().toLowerCase();
+  const phone = normalizeSmsNumber(input.phone ?? "");
+  if (!phone || phone.replace(/\D/g, "").length < 10) {
+    throw new AppError(400, "A valid mobile number is required", "PHONE_REQUIRED");
+  }
   await assertTenantRoles(tenantId, input.roleIds);
   const exists = await prisma.user.findFirst({ where: tenantScope(tenantId, { email }) });
   if (exists) throw new AppError(409, "Email already exists", "USER_EXISTS");
@@ -181,7 +186,7 @@ export async function createUser(tenantId: string, input: UserInput) {
       email,
       firstName: input.firstName,
       lastName: input.lastName,
-      phone: input.phone?.trim() || null,
+      phone,
       passwordHash: await bcrypt.hash(input.password, 12),
       roles: {
         create: [...new Set(input.roleIds)].map((roleId) => ({ roleId, tenantId })),
@@ -220,6 +225,14 @@ export async function updateUser(
     if (exists) throw new AppError(409, "Email already exists", "USER_EXISTS");
   }
 
+  const phone =
+    input.phone === undefined
+      ? undefined
+      : normalizeSmsNumber(input.phone);
+  if (phone !== undefined && (!phone || phone.replace(/\D/g, "").length < 10)) {
+    throw new AppError(400, "A valid mobile number is required", "PHONE_REQUIRED");
+  }
+
   return prisma.$transaction(async (tx) => {
     if (input.roleIds) {
       await tx.userRole.deleteMany({ where: { userId, tenantId } });
@@ -230,7 +243,7 @@ export async function updateUser(
         email,
         firstName: input.firstName,
         lastName: input.lastName,
-        phone: input.phone === undefined ? undefined : input.phone?.trim() || null,
+        phone,
         status: input.status,
         passwordHash: input.password ? await bcrypt.hash(input.password, 12) : undefined,
         roles: input.roleIds

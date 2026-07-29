@@ -1,56 +1,59 @@
-import { env, isTwilioEnvConfigured } from "../src/config/env.js";
-import { normalizeSmsNumber } from "../src/lib/sms.js";
+import { env, isMsg91EnvConfigured } from "../src/config/env.js";
+import { normalizeSmsNumber, toMsg91Mobile } from "../src/lib/sms.js";
 
 const toArg = process.argv[2];
 
-if (!isTwilioEnvConfigured()) {
-  console.error("Twilio env is not configured.");
-  console.error("Set Twilio_ACCOUNT_SID, Twilio_AUTH_TOKEN, Twilio_PHONE_NUMBER in .env");
+if (!isMsg91EnvConfigured()) {
+  console.error("MSG91 env is not configured.");
+  console.error("Set MSG91_AUTH_KEY and MSG91_SENDER_ID in .env");
+  console.error("Optional: MSG91_TEMPLATE_ID (recommended for India DLT)");
   process.exit(1);
 }
 
-const accountSid = env.TWILIO_ACCOUNT_SID!;
-const authToken = env.TWILIO_AUTH_TOKEN!;
-const fromNumber = normalizeSmsNumber(env.TWILIO_FROM_NUMBER!);
+const authKey = env.MSG91_AUTH_KEY!;
+const senderId = env.MSG91_SENDER_ID!;
+const templateId = env.MSG91_TEMPLATE_ID ?? "";
 const toNumber = normalizeSmsNumber(toArg || "");
+const mobile = toArg ? toMsg91Mobile(toArg) : "";
 
-console.log("Twilio check");
-console.log(`- Account SID length: ${accountSid.length} (expected ~34, starts with AC)`);
-console.log(`- Account SID prefix: ${accountSid.slice(0, 4)}...`);
-console.log(`- Auth token length: ${authToken.length}`);
-console.log(`- From: ${fromNumber}`);
-console.log(`- To:   ${toNumber || "(pass a number: npm run sms:verify -- +918086136588)"}`);
+console.log("MSG91 check");
+console.log(`- Auth key length: ${authKey.length}`);
+console.log(`- Sender ID: ${senderId}`);
+console.log(`- Template/Flow ID: ${templateId || "(not set — will use sendhttp)"}`);
+console.log(`- To (E.164): ${toNumber || "(pass a number: npm run sms:verify -- +918086136588)"}`);
+console.log(`- To (MSG91): ${mobile || "-"}`);
 
-if (accountSid.length !== 34) {
-  console.warn(
-    "WARNING: Twilio Account SID is usually exactly 34 characters (AC + 32). Yours looks wrong — copy again from Twilio Console home.",
-  );
-}
-if (fromNumber.startsWith("+91")) {
-  console.warn(
-    "WARNING: From looks like an Indian personal number. On Twilio trial, From must be your Twilio number (often +1...). Put +91... on the student as To.",
-  );
-}
-if (!toNumber) {
+if (!mobile) {
   process.exit(0);
 }
 
-const auth = Buffer.from(`${accountSid}:${authToken}`).toString("base64");
-const response = await fetch(
-  `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-  {
+const body = "SaaS CMS LMS SMS test via MSG91";
+
+let response: Response;
+if (templateId) {
+  response = await fetch("https://control.msg91.com/api/v5/flow/", {
     method: "POST",
     headers: {
-      Authorization: `Basic ${auth}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+      authkey: authKey,
+      "Content-Type": "application/json",
     },
-    body: new URLSearchParams({
-      To: toNumber,
-      From: fromNumber,
-      Body: "SaaS CMS LMS SMS test",
+    body: JSON.stringify({
+      template_id: templateId,
+      sender: senderId,
+      short_url: "0",
+      recipients: [{ mobiles: mobile, VAR1: body, var: body }],
     }),
-  },
-);
+  });
+} else {
+  const url = new URL("https://api.msg91.com/api/sendhttp.php");
+  url.searchParams.set("authkey", authKey);
+  url.searchParams.set("mobiles", mobile);
+  url.searchParams.set("message", body);
+  url.searchParams.set("sender", senderId);
+  url.searchParams.set("route", "4");
+  url.searchParams.set("country", "91");
+  response = await fetch(url, { method: "GET" });
+}
 
 const text = await response.text();
 console.log(`HTTP ${response.status}`);

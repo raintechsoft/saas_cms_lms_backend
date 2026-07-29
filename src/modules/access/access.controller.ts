@@ -28,7 +28,12 @@ const createUserBody = z.object({
   firstName: z.string().trim().min(1).max(100),
   lastName: z.string().trim().min(1).max(100),
   password: z.string().min(8).max(128),
-  phone: z.string().trim().max(30).nullable().optional(),
+  phone: z
+    .string()
+    .trim()
+    .min(10)
+    .max(30)
+    .refine((value) => value.replace(/\D/g, "").length >= 10, "Mobile number is required"),
   roleIds: z.array(z.string().min(1)).min(1),
 });
 const updateUserBody = z.object({
@@ -36,7 +41,13 @@ const updateUserBody = z.object({
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().min(1).max(100).optional(),
   password: z.string().min(8).max(128).optional(),
-  phone: z.string().trim().max(30).nullable().optional(),
+  phone: z
+    .string()
+    .trim()
+    .min(10)
+    .max(30)
+    .refine((value) => value.replace(/\D/g, "").length >= 10, "Mobile number is required")
+    .optional(),
   status: z.nativeEnum(UserStatus).optional(),
   roleIds: z.array(z.string().min(1)).min(1).optional(),
 }).strict();
