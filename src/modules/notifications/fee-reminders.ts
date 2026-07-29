@@ -31,10 +31,11 @@ export type SendFeeReminderOptions = {
   sendSms?: boolean;
   minBalance?: number;
   title?: string;
+  studentId?: string;
 };
 
 const assignmentInclude = {
-  feeMaster: true,
+  feeMaster: { include: { fineRanges: { orderBy: { startDate: "asc" as const } } } },
   discount: true,
   paymentItems: {
     where: { payment: { status: PaymentStatus.COLLECTED } },
@@ -64,14 +65,38 @@ function calculateFine(
   dueDate: Date,
   graceDays: number,
   asOf: Date,
+  ranges: Array<{
+    startDate: Date;
+    endDate: Date | null;
+    amount: Prisma.Decimal;
+    perDay: boolean;
+  }> = [],
 ) {
   const effectiveDue = new Date(dueDate);
   effectiveDue.setDate(effectiveDue.getDate() + (graceDays || 0));
   if (asOf <= effectiveDue) return 0;
   if (fineType === FeeFineType.NONE) return 0;
-  return fineType === FeeFineType.PERCENTAGE
-    ? (base * money(fineValue)) / 100
-    : money(fineValue);
+  if (fineType === FeeFineType.PERCENTAGE) return (base * money(fineValue)) / 100;
+  if (fineType === FeeFineType.PER_DAY) {
+    const days = Math.max(
+      1,
+      Math.ceil((asOf.getTime() - effectiveDue.getTime()) / 86_400_000),
+    );
+    return days * money(fineValue);
+  }
+  if (fineType === FeeFineType.DATE_RANGE) {
+    const range = ranges.find(
+      (item) => asOf >= item.startDate && (!item.endDate || asOf <= item.endDate),
+    );
+    if (!range) return 0;
+    if (!range.perDay) return money(range.amount);
+    const days = Math.max(
+      1,
+      Math.ceil((asOf.getTime() - range.startDate.getTime()) / 86_400_000) + 1,
+    );
+    return days * money(range.amount);
+  }
+  return money(fineValue);
 }
 
 function toBalance(
@@ -93,6 +118,7 @@ function toBalance(
     assignment.feeMaster.dueDate,
     assignment.feeMaster.graceDays,
     asOf,
+    assignment.feeMaster.fineRanges,
   );
   const paid = assignment.paymentItems.reduce(
     (sum, item) => sum + money(item.paidAmount),
@@ -187,6 +213,9 @@ export async function sendFeeRemindersForSession(
     where: tenantScope(tenantId, {
       status: FeeAssignmentStatus.ACTIVE,
       feeMaster: { academicSessionId: sessionId },
+      ...(options.studentId
+        ? { studentEnrollment: { studentId: options.studentId } }
+        : {}),
     }),
     include: {
       ...assignmentInclude,

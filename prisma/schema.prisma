@@ -7,7 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 enum TenantType {
   SCHOOL
   COLLEGE_UNIVERSITY
@@ -81,11 +80,20 @@ enum FeeFineType {
   NONE
   FIXED
   PERCENTAGE
+  PER_DAY
+  DATE_RANGE
 }
 
 enum DiscountType {
   FIXED
   PERCENTAGE
+}
+
+enum FeeInvoiceStatus {
+  DUE
+  PAID
+  OVERDUE
+  CANCELLED
 }
 
 enum FeeAssignmentStatus {
@@ -238,18 +246,18 @@ model Reseller {
 }
 
 model Tenant {
-  id                     String                   @id @default(cuid())
+  id                     String                       @id @default(cuid())
   name                   String
-  slug                   String                   @unique
+  slug                   String                       @unique
   type                   TenantType
-  productMode            ProductMode              @map("product_mode")
-  distributionModel      DistributionModel        @default(UNIVERSE_AI) @map("distribution_model")
-  status                 TenantStatus             @default(ACTIVE)
+  productMode            ProductMode                  @map("product_mode")
+  distributionModel      DistributionModel            @default(UNIVERSE_AI) @map("distribution_model")
+  status                 TenantStatus                 @default(ACTIVE)
   branding               Json?
-  resellerId             String?                  @map("reseller_id")
-  reseller               Reseller?                @relation(fields: [resellerId], references: [id], onDelete: SetNull)
-  createdAt              DateTime                 @default(now()) @map("created_at")
-  updatedAt              DateTime                 @updatedAt @map("updated_at")
+  resellerId             String?                      @map("reseller_id")
+  reseller               Reseller?                    @relation(fields: [resellerId], references: [id], onDelete: SetNull)
+  createdAt              DateTime                     @default(now()) @map("created_at")
+  updatedAt              DateTime                     @updatedAt @map("updated_at")
   users                  User[]
   roles                  Role[]
   userRoles              UserRole[]
@@ -267,8 +275,10 @@ model Tenant {
   feeTypes               FeeType[]
   feeGroups              FeeGroup[]
   feeMasters             FeeMaster[]
+  feeFineRanges          FeeFineRange[]
   feeDiscounts           FeeDiscount[]
   feeAssignments         StudentFeeAssignment[]
+  feeInvoices            FeeInvoice[]
   feePayments            FeePayment[]
   feeReceiptBooks        FeeReceiptBook[]
   feeSetting             TenantFeeSetting?
@@ -325,49 +335,49 @@ model Tenant {
 }
 
 model User {
-  id                       String                @id @default(cuid())
-  tenantId                 String?               @map("tenant_id")
-  resellerId               String?               @map("reseller_id")
+  id                       String                       @id @default(cuid())
+  tenantId                 String?                      @map("tenant_id")
+  resellerId               String?                      @map("reseller_id")
   email                    String
-  passwordHash             String?               @map("password_hash")
-  googleSubjectId          String?               @unique @map("google_subject_id")
+  passwordHash             String?                      @map("password_hash")
+  googleSubjectId          String?                      @unique @map("google_subject_id")
   phone                    String?
-  avatarUrl                String?               @map("avatar_url")
-  firstName                String                @map("first_name")
-  lastName                 String                @map("last_name")
-  status                   UserStatus            @default(ACTIVE)
-  createdAt                DateTime              @default(now()) @map("created_at")
-  updatedAt                DateTime              @updatedAt @map("updated_at")
-  tenant                   Tenant?               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  reseller                 Reseller?             @relation(fields: [resellerId], references: [id], onDelete: Cascade)
+  avatarUrl                String?                      @map("avatar_url")
+  firstName                String                       @map("first_name")
+  lastName                 String                       @map("last_name")
+  status                   UserStatus                   @default(ACTIVE)
+  createdAt                DateTime                     @default(now()) @map("created_at")
+  updatedAt                DateTime                     @updatedAt @map("updated_at")
+  tenant                   Tenant?                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  reseller                 Reseller?                    @relation(fields: [resellerId], references: [id], onDelete: Cascade)
   roles                    UserRole[]
   studentProfile           Student?
-  taughtClassSections      ClassSection[]        @relation("ClassTeacher")
-  subjectAssignments       ClassSubject[]        @relation("SubjectTeacher")
-  feePaymentsCreated       FeePayment[]          @relation("PaymentCreator")
-  attendanceMarked         AttendanceRecord[]    @relation("AttendanceMarker")
-  leavesReviewed           StudentLeave[]        @relation("LeaveReviewer")
-  pointsAwarded            AttendancePoint[]     @relation("PointAwarder")
+  taughtClassSections      ClassSection[]               @relation("ClassTeacher")
+  subjectAssignments       ClassSubject[]               @relation("SubjectTeacher")
+  feePaymentsCreated       FeePayment[]                 @relation("PaymentCreator")
+  attendanceMarked         AttendanceRecord[]           @relation("AttendanceMarker")
+  leavesReviewed           StudentLeave[]               @relation("LeaveReviewer")
+  pointsAwarded            AttendancePoint[]            @relation("PointAwarder")
   staffProfile             StaffProfile?
-  staffAttendanceMarked    StaffAttendance[]     @relation("StaffAttendanceMarker")
-  staffLeavesReviewed      StaffLeave[]          @relation("StaffLeaveReviewer")
-  teacherRatingsGiven      TeacherRating[]       @relation("TeacherRatingAuthor")
-  documentsGenerated       GeneratedDocument[]   @relation("DocumentGenerator")
+  staffAttendanceMarked    StaffAttendance[]            @relation("StaffAttendanceMarker")
+  staffLeavesReviewed      StaffLeave[]                 @relation("StaffLeaveReviewer")
+  teacherRatingsGiven      TeacherRating[]              @relation("TeacherRatingAuthor")
+  documentsGenerated       GeneratedDocument[]          @relation("DocumentGenerator")
   auditLogs                AuditLog[]
   authVerifications        AuthVerification[]
-  timetableEntries         TimetableEntry[]      @relation("TimetableTeacher")
-  homeworkCreated          Homework[]            @relation("HomeworkCreator")
-  homeworkEvaluated        HomeworkSubmission[]  @relation("HomeworkEvaluator")
-  studentDocumentsUploaded StudentDocument[]     @relation("StudentDocumentUploader")
-  backupsCreated           ConfigurationBackup[] @relation("BackupCreator")
-  backupsRestored          ConfigurationBackup[] @relation("BackupRestorer")
-  guardianOf               StudentGuardian[]     @relation("GuardianUser")
+  timetableEntries         TimetableEntry[]             @relation("TimetableTeacher")
+  homeworkCreated          Homework[]                   @relation("HomeworkCreator")
+  homeworkEvaluated        HomeworkSubmission[]         @relation("HomeworkEvaluator")
+  studentDocumentsUploaded StudentDocument[]            @relation("StudentDocumentUploader")
+  backupsCreated           ConfigurationBackup[]        @relation("BackupCreator")
+  backupsRestored          ConfigurationBackup[]        @relation("BackupRestorer")
+  guardianOf               StudentGuardian[]            @relation("GuardianUser")
   admissionsReviewed       OnlineAdmissionApplication[] @relation("AdmissionReviewer")
   noticesCreated           Notice[]                     @relation("NoticeAuthor")
   notifications            NotificationRead[]
-  sentNotifications       Notification[]     @relation("NotificationAuthor")
-  targetedNotifications   Notification[] @relation("NotificationTarget")
-  pushSubscriptions       PushSubscription[]
+  sentNotifications        Notification[]               @relation("NotificationAuthor")
+  targetedNotifications    Notification[]               @relation("NotificationTarget")
+  pushSubscriptions        PushSubscription[]
 
   @@unique([tenantId, email])
   @@index([email])
@@ -426,18 +436,19 @@ model RolePermission {
 }
 
 model AcademicSession {
-  id                String              @id @default(cuid())
-  tenantId          String              @map("tenant_id")
+  id                String                       @id @default(cuid())
+  tenantId          String                       @map("tenant_id")
   name              String
-  startDate         DateTime            @map("start_date") @db.Date
-  endDate           DateTime            @map("end_date") @db.Date
-  isCurrent         Boolean             @default(false) @map("is_current")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  startDate         DateTime                     @map("start_date") @db.Date
+  endDate           DateTime                     @map("end_date") @db.Date
+  isCurrent         Boolean                      @default(false) @map("is_current")
+  createdAt         DateTime                     @default(now()) @map("created_at")
+  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  tenant            Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   classSections     ClassSection[]
   enrollments       StudentEnrollment[]
   feeMasters        FeeMaster[]
+  feeInvoices       FeeInvoice[]
   feePayments       FeePayment[]
   attendanceRecords AttendanceRecord[]
   studentLeaves     StudentLeave[]
@@ -511,61 +522,62 @@ model StudentHouse {
 }
 
 model Student {
-  id                 String              @id @default(cuid())
-  tenantId           String              @map("tenant_id")
-  userId             String?             @unique @map("user_id")
-  admissionNumber    String              @map("admission_number")
-  firstName          String              @map("first_name")
-  lastName           String?             @map("last_name")
+  id                 String                       @id @default(cuid())
+  tenantId           String                       @map("tenant_id")
+  userId             String?                      @unique @map("user_id")
+  admissionNumber    String                       @map("admission_number")
+  firstName          String                       @map("first_name")
+  lastName           String?                      @map("last_name")
   gender             Gender?
-  dateOfBirth        DateTime?           @map("date_of_birth") @db.Date
-  categoryId         String?             @map("category_id")
-  houseId            String?             @map("house_id")
+  dateOfBirth        DateTime?                    @map("date_of_birth") @db.Date
+  categoryId         String?                      @map("category_id")
+  houseId            String?                      @map("house_id")
   religion           String?
   caste              String?
   mobile             String?
   email              String?
-  admissionDate      DateTime            @map("admission_date") @db.Date
-  photoUrl           String?             @map("photo_url")
-  bloodGroup         String?             @map("blood_group")
+  admissionDate      DateTime                     @map("admission_date") @db.Date
+  photoUrl           String?                      @map("photo_url")
+  bloodGroup         String?                      @map("blood_group")
   height             Float?
   weight             Float?
-  currentAddress     String?             @map("current_address") @db.Text
-  permanentAddress   String?             @map("permanent_address") @db.Text
-  fatherName         String?             @map("father_name")
-  fatherPhone        String?             @map("father_phone")
-  fatherEmail        String?             @map("father_email")
-  fatherOccupation   String?             @map("father_occupation")
-  motherName         String?             @map("mother_name")
-  motherPhone        String?             @map("mother_phone")
-  motherEmail        String?             @map("mother_email")
-  motherOccupation   String?             @map("mother_occupation")
-  guardianName       String?             @map("guardian_name")
-  guardianRelation   String?             @map("guardian_relation")
-  guardianPhone      String?             @map("guardian_phone")
-  guardianEmail      String?             @map("guardian_email")
-  guardianOccupation String?             @map("guardian_occupation")
+  currentAddress     String?                      @map("current_address") @db.Text
+  permanentAddress   String?                      @map("permanent_address") @db.Text
+  fatherName         String?                      @map("father_name")
+  fatherPhone        String?                      @map("father_phone")
+  fatherEmail        String?                      @map("father_email")
+  fatherOccupation   String?                      @map("father_occupation")
+  motherName         String?                      @map("mother_name")
+  motherPhone        String?                      @map("mother_phone")
+  motherEmail        String?                      @map("mother_email")
+  motherOccupation   String?                      @map("mother_occupation")
+  guardianName       String?                      @map("guardian_name")
+  guardianRelation   String?                      @map("guardian_relation")
+  guardianPhone      String?                      @map("guardian_phone")
+  guardianEmail      String?                      @map("guardian_email")
+  guardianOccupation String?                      @map("guardian_occupation")
   nationality        String?
-  admissionType      AdmissionType       @default(REGULAR) @map("admission_type")
-  rteEnabled         Boolean             @default(false) @map("rte_enabled")
-  rteSchemeName      String?             @map("rte_scheme_name")
-  rteCertificateNo   String?             @map("rte_certificate_no")
-  transportOptIn     Boolean             @default(false) @map("transport_opt_in")
-  transportRoute     String?             @map("transport_route")
-  hostelOptIn        Boolean             @default(false) @map("hostel_opt_in")
-  hostelRoom         String?             @map("hostel_room")
-  additionalNotes    String?             @map("additional_notes") @db.Text
-  status             StudentStatus       @default(ACTIVE)
-  disabledReason     String?             @map("disabled_reason")
-  siblingGroupId     String?             @map("sibling_group_id")
-  createdAt          DateTime            @default(now()) @map("created_at")
-  updatedAt          DateTime            @updatedAt @map("updated_at")
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user               User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
-  category           StudentCategory?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  house              StudentHouse?       @relation(fields: [houseId], references: [id], onDelete: SetNull)
+  admissionType      AdmissionType                @default(REGULAR) @map("admission_type")
+  rteEnabled         Boolean                      @default(false) @map("rte_enabled")
+  rteSchemeName      String?                      @map("rte_scheme_name")
+  rteCertificateNo   String?                      @map("rte_certificate_no")
+  transportOptIn     Boolean                      @default(false) @map("transport_opt_in")
+  transportRoute     String?                      @map("transport_route")
+  hostelOptIn        Boolean                      @default(false) @map("hostel_opt_in")
+  hostelRoom         String?                      @map("hostel_room")
+  additionalNotes    String?                      @map("additional_notes") @db.Text
+  status             StudentStatus                @default(ACTIVE)
+  disabledReason     String?                      @map("disabled_reason")
+  siblingGroupId     String?                      @map("sibling_group_id")
+  createdAt          DateTime                     @default(now()) @map("created_at")
+  updatedAt          DateTime                     @updatedAt @map("updated_at")
+  tenant             Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user               User?                        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  category           StudentCategory?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  house              StudentHouse?                @relation(fields: [houseId], references: [id], onDelete: SetNull)
   enrollments        StudentEnrollment[]
   feePayments        FeePayment[]
+  feeInvoices        FeeInvoice[]
   generatedDocuments GeneratedDocument[]
   documents          StudentDocument[]
   guardians          StudentGuardian[]
@@ -612,19 +624,19 @@ model Section {
 }
 
 model ClassSection {
-  id                String              @id @default(cuid())
-  tenantId          String              @map("tenant_id")
-  academicSessionId String              @map("academic_session_id")
-  classId           String              @map("class_id")
-  sectionId         String              @map("section_id")
-  classTeacherId    String?             @map("class_teacher_id")
-  createdAt         DateTime            @default(now()) @map("created_at")
-  updatedAt         DateTime            @updatedAt @map("updated_at")
-  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  academicSession   AcademicSession     @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
-  academicClass     AcademicClass       @relation(fields: [classId], references: [id], onDelete: Cascade)
-  section           Section             @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  classTeacher      User?               @relation("ClassTeacher", fields: [classTeacherId], references: [id], onDelete: SetNull)
+  id                String                       @id @default(cuid())
+  tenantId          String                       @map("tenant_id")
+  academicSessionId String                       @map("academic_session_id")
+  classId           String                       @map("class_id")
+  sectionId         String                       @map("section_id")
+  classTeacherId    String?                      @map("class_teacher_id")
+  createdAt         DateTime                     @default(now()) @map("created_at")
+  updatedAt         DateTime                     @updatedAt @map("updated_at")
+  tenant            Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicSession   AcademicSession              @relation(fields: [academicSessionId], references: [id], onDelete: Cascade)
+  academicClass     AcademicClass                @relation(fields: [classId], references: [id], onDelete: Cascade)
+  section           Section                      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  classTeacher      User?                        @relation("ClassTeacher", fields: [classTeacherId], references: [id], onDelete: SetNull)
   enrollments       StudentEnrollment[]
   subjects          ClassSubject[]
   feeMasters        FeeMaster[]
@@ -772,6 +784,7 @@ model FeeMaster {
   feeGroup          FeeGroup               @relation(fields: [feeGroupId], references: [id], onDelete: Restrict)
   feeType           FeeType                @relation(fields: [feeTypeId], references: [id], onDelete: Restrict)
   assignments       StudentFeeAssignment[]
+  fineRanges        FeeFineRange[]
 
   @@unique([tenantId, academicSessionId, classSectionId, feeGroupId, feeTypeId, dueDate])
   @@index([tenantId, academicSessionId, dueDate])
@@ -815,6 +828,7 @@ model StudentFeeAssignment {
   feeMaster           FeeMaster           @relation(fields: [feeMasterId], references: [id], onDelete: Cascade)
   discount            FeeDiscount?        @relation(fields: [discountId], references: [id], onDelete: SetNull)
   paymentItems        FeePaymentItem[]
+  invoiceItems        FeeInvoiceItem[]
 
   @@unique([tenantId, studentEnrollmentId, feeMasterId])
   @@index([tenantId, status])
@@ -887,22 +901,84 @@ model FeePaymentItem {
   @@map("fee_payment_items")
 }
 
+model FeeFineRange {
+  id          String    @id @default(cuid())
+  tenantId    String    @map("tenant_id")
+  feeMasterId String    @map("fee_master_id")
+  startDate   DateTime  @map("start_date") @db.Date
+  endDate     DateTime? @map("end_date") @db.Date
+  amount      Decimal   @db.Decimal(12, 2)
+  perDay      Boolean   @default(false) @map("per_day")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feeMaster   FeeMaster @relation(fields: [feeMasterId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, feeMasterId, startDate])
+  @@map("fee_fine_ranges")
+}
+
+model FeeInvoice {
+  id                String           @id @default(cuid())
+  tenantId          String           @map("tenant_id")
+  academicSessionId String           @map("academic_session_id")
+  studentId         String           @map("student_id")
+  invoiceNumber     String           @map("invoice_number")
+  dueDate           DateTime         @map("due_date") @db.Date
+  status            FeeInvoiceStatus @default(DUE)
+  subtotal          Decimal          @db.Decimal(12, 2)
+  discountAmount    Decimal          @default(0) @map("discount_amount") @db.Decimal(12, 2)
+  fineAmount        Decimal          @default(0) @map("fine_amount") @db.Decimal(12, 2)
+  total             Decimal          @db.Decimal(12, 2)
+  paidAmount        Decimal          @default(0) @map("paid_amount") @db.Decimal(12, 2)
+  note              String?          @db.Text
+  createdById       String           @map("created_by_id")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicSession   AcademicSession  @relation(fields: [academicSessionId], references: [id], onDelete: Restrict)
+  student           Student          @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  items             FeeInvoiceItem[]
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, academicSessionId, status, dueDate])
+  @@index([tenantId, studentId])
+  @@map("fee_invoices")
+}
+
+model FeeInvoiceItem {
+  id           String               @id @default(cuid())
+  invoiceId    String               @map("invoice_id")
+  assignmentId String               @map("assignment_id")
+  description  String
+  baseAmount   Decimal              @map("base_amount") @db.Decimal(12, 2)
+  discount     Decimal              @default(0) @db.Decimal(12, 2)
+  fine         Decimal              @default(0) @db.Decimal(12, 2)
+  amount       Decimal              @db.Decimal(12, 2)
+  invoice      FeeInvoice           @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  assignment   StudentFeeAssignment @relation(fields: [assignmentId], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, assignmentId])
+  @@index([assignmentId])
+  @@map("fee_invoice_items")
+}
+
 model TenantFeeSetting {
-  id                     String    @id @default(cuid())
-  tenantId               String    @unique @map("tenant_id")
-  autoReminder           Boolean   @default(false) @map("auto_reminder")
-  reminderDaysBefore     Int       @default(3) @map("reminder_days_before")
-  reminderDaysAfter      Int       @default(1) @map("reminder_days_after")
-  reminderEmailEnabled   Boolean   @default(true) @map("reminder_email_enabled")
-  reminderSmsEnabled     Boolean   @default(true) @map("reminder_sms_enabled")
-  reminderExecutionTime  String    @default("09:00") @map("reminder_execution_time")
-  reminderSkipWeekends   Boolean   @default(true) @map("reminder_skip_weekends")
-  reminderMinBalance     Boolean   @default(true) @map("reminder_min_balance")
-  reminderSteps          Json?     @map("reminder_steps")
-  lastReminderRunAt      DateTime? @map("last_reminder_run_at")
-  createdAt              DateTime  @default(now()) @map("created_at")
-  updatedAt              DateTime  @updatedAt @map("updated_at")
-  tenant                 Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id                    String    @id @default(cuid())
+  tenantId              String    @unique @map("tenant_id")
+  autoReminder          Boolean   @default(false) @map("auto_reminder")
+  reminderDaysBefore    Int       @default(3) @map("reminder_days_before")
+  reminderDaysAfter     Int       @default(1) @map("reminder_days_after")
+  reminderEmailEnabled  Boolean   @default(true) @map("reminder_email_enabled")
+  reminderSmsEnabled    Boolean   @default(true) @map("reminder_sms_enabled")
+  reminderExecutionTime String    @default("09:00") @map("reminder_execution_time")
+  reminderSkipWeekends  Boolean   @default(true) @map("reminder_skip_weekends")
+  reminderMinBalance    Boolean   @default(true) @map("reminder_min_balance")
+  reminderSteps         Json?     @map("reminder_steps")
+  lastReminderRunAt     DateTime? @map("last_reminder_run_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  tenant                Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("tenant_fee_settings")
 }
@@ -1770,23 +1846,23 @@ enum NoticeAudience {
 }
 
 model Notice {
-  id                String          @id @default(cuid())
-  tenantId          String          @map("tenant_id")
+  id                String           @id @default(cuid())
+  tenantId          String           @map("tenant_id")
   title             String
-  body              String          @db.Text
-  attachmentUrl     String?         @map("attachment_url")
-  audience          NoticeAudience  @default(ALL)
-  academicSessionId String?         @map("academic_session_id")
-  classSectionId    String?         @map("class_section_id")
-  publishedAt       DateTime        @default(now()) @map("published_at")
-  expiresAt         DateTime?       @map("expires_at")
-  createdById       String          @map("created_by_id")
-  createdAt         DateTime        @default(now()) @map("created_at")
-  updatedAt         DateTime        @updatedAt @map("updated_at")
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  body              String           @db.Text
+  attachmentUrl     String?          @map("attachment_url")
+  audience          NoticeAudience   @default(ALL)
+  academicSessionId String?          @map("academic_session_id")
+  classSectionId    String?          @map("class_section_id")
+  publishedAt       DateTime         @default(now()) @map("published_at")
+  expiresAt         DateTime?        @map("expires_at")
+  createdById       String           @map("created_by_id")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   academicSession   AcademicSession? @relation(fields: [academicSessionId], references: [id], onDelete: SetNull)
-  classSection      ClassSection?   @relation(fields: [classSectionId], references: [id], onDelete: SetNull)
-  createdBy         User            @relation("NoticeAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  classSection      ClassSection?    @relation(fields: [classSectionId], references: [id], onDelete: SetNull)
+  createdBy         User             @relation("NoticeAuthor", fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([tenantId, publishedAt])
   @@index([tenantId, audience])
@@ -1794,14 +1870,14 @@ model Notice {
 }
 
 model AuthVerification {
-  id        String                  @id @default(cuid())
-  userId    String                  @map("user_id")
-  purpose   AuthVerificationPurpose
-  codeHash  String                  @map("code_hash")
-  expiresAt DateTime                @map("expires_at")
-  consumedAt DateTime?              @map("consumed_at")
-  createdAt DateTime                @default(now()) @map("created_at")
-  user      User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String                  @id @default(cuid())
+  userId     String                  @map("user_id")
+  purpose    AuthVerificationPurpose
+  codeHash   String                  @map("code_hash")
+  expiresAt  DateTime                @map("expires_at")
+  consumedAt DateTime?               @map("consumed_at")
+  createdAt  DateTime                @default(now()) @map("created_at")
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, purpose])
   @@map("auth_verifications")
@@ -1816,23 +1892,23 @@ enum NotificationType {
 }
 
 model Notification {
-  id               String             @id @default(cuid())
-  tenantId         String             @map("tenant_id")
-  title            String
-  body             String             @db.Text
-  type             NotificationType   @default(ANNOUNCEMENT)
-  audience         NoticeAudience     // reuse existing enum: ALL, STUDENTS, PARENTS
-  classSectionId   String?            @map("class_section_id")
-  targetUserId     String?            @map("target_user_id")
-  createdById      String             @map("created_by_id")
-  emailSent        Boolean            @default(false) @map("email_sent")
-  sentAt           DateTime           @default(now()) @map("sent_at")
-  createdAt        DateTime           @default(now()) @map("created_at")
-  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  classSection     ClassSection?     @relation(fields: [classSectionId], references: [id], onDelete: SetNull)
-  targetUser       User?             @relation("NotificationTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
-  createdBy        User               @relation("NotificationAuthor", fields: [createdById], references: [id], onDelete: Restrict)
-  reads            NotificationRead[]
+  id             String             @id @default(cuid())
+  tenantId       String             @map("tenant_id")
+  title          String
+  body           String             @db.Text
+  type           NotificationType   @default(ANNOUNCEMENT)
+  audience       NoticeAudience // reuse existing enum: ALL, STUDENTS, PARENTS
+  classSectionId String?            @map("class_section_id")
+  targetUserId   String?            @map("target_user_id")
+  createdById    String             @map("created_by_id")
+  emailSent      Boolean            @default(false) @map("email_sent")
+  sentAt         DateTime           @default(now()) @map("sent_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  classSection   ClassSection?      @relation(fields: [classSectionId], references: [id], onDelete: SetNull)
+  targetUser     User?              @relation("NotificationTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  createdBy      User               @relation("NotificationAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  reads          NotificationRead[]
 
   @@index([tenantId, createdAt])
   @@map("notifications")

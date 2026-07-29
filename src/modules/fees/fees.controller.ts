@@ -1,6 +1,7 @@
 import {
   DiscountType,
   FeeFineType,
+  FeeInvoiceStatus,
   PaymentMode,
 } from "@prisma/client";
 import type { Request, Response } from "express";
@@ -9,6 +10,7 @@ import {
   assignFeeMaster,
   carryForwardPreviousDues,
   collectPayment,
+  createFeeInvoice,
   createFeeDiscount,
   createFeeGroup,
   createFeeMaster,
@@ -22,9 +24,11 @@ import {
   deleteReceiptBook,
   getFeeSetup,
   getFeeSummary,
+  listFeeInvoices,
   listStudentFees,
   revertPayment,
   searchPayments,
+  setFeeInvoiceStatus,
   setCustomFeeActive,
   updateAssignmentDiscount,
   updateFeeDiscount,
@@ -34,7 +38,9 @@ import {
   updateReceiptBook,
 } from "./fees.service.js";
 import {
+  getFeeReminderStats,
   runFeeRemindersNow,
+  sendStudentFeeReminder,
   updateFeeReminder,
 } from "./fee-reminders.service.js";
 
@@ -89,6 +95,17 @@ const feeMasterBody = z.object({
   fineValue: z.coerce.number().min(0).default(0),
   graceDays: z.coerce.number().int().min(0).max(365).default(0),
   isCustom: z.boolean().default(false),
+  fineRanges: z
+    .array(
+      z.object({
+        startDate: z.coerce.date(),
+        endDate: z.coerce.date().nullable().optional(),
+        amount: z.coerce.number().min(0),
+        perDay: z.boolean().optional().default(false),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 const feeMasterUpdateBody = feeMasterBody.partial();
 const customFeeBody = z.object({
@@ -126,6 +143,19 @@ const paymentBody = z.object({
   })).min(1),
 });
 const paymentSearchQuery = z.object({ query: z.string().trim().max(100).optional() });
+const invoiceBody = z.object({
+  studentId: z.string().min(1),
+  academicSessionId: z.string().min(1),
+  dueDate: z.coerce.date(),
+  assignmentIds: z.array(z.string().min(1)).min(1).max(100),
+  note: z.string().trim().max(1000).nullable().optional(),
+});
+const invoiceQuery = z.object({
+  academicSessionId: z.string().min(1).optional(),
+  status: z.nativeEnum(FeeInvoiceStatus).optional(),
+  query: z.string().trim().max(100).optional(),
+});
+const invoiceStatusBody = z.object({ status: z.nativeEnum(FeeInvoiceStatus) });
 const revertBody = z.object({ reason: z.string().trim().min(3).max(1000) });
 const summaryQuery = z.object({
   sessionId: z.string().min(1),
@@ -153,11 +183,16 @@ const reminderBody = z.object({
 const reminderRunBody = z.object({
   sessionId: z.string().min(1).optional(),
 });
+const studentReminderBody = z.object({
+  studentId: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
+});
 const carryForwardBody = z.object({
   fromSessionId: z.string().min(1),
   targetEnrollmentId: z.string().min(1),
   dueDate: z.coerce.date(),
   asOf: z.coerce.date().optional(),
+  amount: z.coerce.number().positive().optional(),
 });
 
 export async function getFeeSetupController(req: Request, res: Response) {
@@ -317,6 +352,28 @@ export async function searchPaymentsController(req: Request, res: Response) {
   res.json({ data: await searchPayments(req.auth!.tenantId!, query) });
 }
 
+export async function createFeeInvoiceController(req: Request, res: Response) {
+  res.status(201).json({
+    data: await createFeeInvoice(
+      req.auth!.tenantId!,
+      req.auth!.userId,
+      invoiceBody.parse(req.body),
+    ),
+  });
+}
+
+export async function listFeeInvoicesController(req: Request, res: Response) {
+  res.json({
+    data: await listFeeInvoices(req.auth!.tenantId!, invoiceQuery.parse(req.query)),
+  });
+}
+
+export async function setFeeInvoiceStatusController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const { status } = invoiceStatusBody.parse(req.body);
+  res.json({ data: await setFeeInvoiceStatus(req.auth!.tenantId!, id, status) });
+}
+
 export async function revertPaymentController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   const { reason } = revertBody.parse(req.body);
@@ -352,6 +409,22 @@ export async function runFeeRemindersController(req: Request, res: Response) {
   res.json({
     data: await runFeeRemindersNow(req.auth!.tenantId!, req.auth!.userId, sessionId),
   });
+}
+
+export async function sendStudentFeeReminderController(req: Request, res: Response) {
+  const { studentId, sessionId } = studentReminderBody.parse(req.body);
+  res.json({
+    data: await sendStudentFeeReminder(
+      req.auth!.tenantId!,
+      req.auth!.userId,
+      studentId,
+      sessionId,
+    ),
+  });
+}
+
+export async function getFeeReminderStatsController(req: Request, res: Response) {
+  res.json({ data: await getFeeReminderStats(req.auth!.tenantId!) });
 }
 
 export async function carryForwardPreviousDuesController(req: Request, res: Response) {

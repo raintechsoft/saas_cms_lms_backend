@@ -228,7 +228,7 @@ export async function updateUser(
   const phone =
     input.phone === undefined
       ? undefined
-      : normalizeSmsNumber(input.phone);
+      : normalizeSmsNumber(input.phone ?? "");
   if (phone !== undefined && (!phone || phone.replace(/\D/g, "").length < 10)) {
     throw new AppError(400, "A valid mobile number is required", "PHONE_REQUIRED");
   }

@@ -77,6 +77,7 @@ import {
   assignFeeMasterController,
   carryForwardPreviousDuesController,
   collectPaymentController,
+  createFeeInvoiceController,
   createFeeDiscountController,
   createFeeGroupController,
   createFeeMasterController,
@@ -89,16 +90,20 @@ import {
   deleteFeeTypeController,
   deleteReceiptBookController,
   getFeeSetupController,
+  getFeeReminderStatsController,
   getFeeSummaryController,
   listStudentFeesController,
+  listFeeInvoicesController,
   revertPaymentController,
   searchPaymentsController,
   setCustomFeeActiveController,
+  setFeeInvoiceStatusController,
   updateAssignmentDiscountController,
   updateFeeDiscountController,
   updateFeeGroupController,
   updateFeeMasterController,
   runFeeRemindersController,
+  sendStudentFeeReminderController,
   updateFeeReminderController,
   updateFeeTypeController,
   updateReceiptBookController,
@@ -592,6 +597,24 @@ campusRouter.get(
   requirePermission("fees.view"),
   asyncHandler(searchPaymentsController),
 );
+campusRouter.post(
+  "/fees/invoices",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(createFeeInvoiceController),
+);
+campusRouter.get(
+  "/fees/invoices",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(listFeeInvoicesController),
+);
+campusRouter.put(
+  "/fees/invoices/:id/status",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(setFeeInvoiceStatusController),
+);
 campusRouter.put(
   "/fees/payments/:id/revert",
   requireEntitlement("CMS"),
@@ -615,6 +638,18 @@ campusRouter.post(
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(runFeeRemindersController),
+);
+campusRouter.post(
+  "/fees/reminders/student",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(sendStudentFeeReminderController),
+);
+campusRouter.get(
+  "/fees/reminders/stats",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(getFeeReminderStatsController),
 );
 campusRouter.post(
   "/fees/carry-forward",

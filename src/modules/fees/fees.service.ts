@@ -3,6 +3,7 @@ import {
   EnrollmentStatus,
   FeeAssignmentStatus,
   FeeFineType,
+  FeeInvoiceStatus,
   PaymentStatus,
   Prisma,
   type PaymentMode,
@@ -24,11 +25,25 @@ interface FeeMasterInput {
   fineValue: number;
   graceDays: number;
   isCustom?: boolean;
+  fineRanges?: Array<{
+    startDate: Date;
+    endDate?: Date | null;
+    amount: number;
+    perDay?: boolean;
+  }>;
 }
 
 interface PaymentItemInput {
   assignmentId: string;
   amount: number;
+}
+
+interface InvoiceInput {
+  studentId: string;
+  academicSessionId: string;
+  dueDate: Date;
+  assignmentIds: string[];
+  note?: string | null;
 }
 
 function money(value: Prisma.Decimal | number | string | null | undefined) {
@@ -54,18 +69,49 @@ function calculateFine(
   dueDate: Date,
   graceDays: number,
   asOf: Date,
+  ranges: Array<{
+    startDate: Date;
+    endDate: Date | null;
+    amount: Prisma.Decimal;
+    perDay: boolean;
+  }> = [],
 ) {
   const effectiveDue = new Date(dueDate);
   effectiveDue.setUTCDate(effectiveDue.getUTCDate() + graceDays);
   if (fineType === FeeFineType.NONE || asOf <= effectiveDue) return 0;
-  return fineType === FeeFineType.PERCENTAGE
-    ? base * money(fineValue) / 100
-    : money(fineValue);
+  if (fineType === FeeFineType.PERCENTAGE) return base * money(fineValue) / 100;
+  if (fineType === FeeFineType.PER_DAY) {
+    const days = Math.max(
+      1,
+      Math.ceil((asOf.getTime() - effectiveDue.getTime()) / 86_400_000),
+    );
+    return days * money(fineValue);
+  }
+  if (fineType === FeeFineType.DATE_RANGE) {
+    const range = ranges.find(
+      (item) =>
+        asOf >= item.startDate &&
+        (!item.endDate || asOf <= item.endDate),
+    );
+    if (!range) return 0;
+    if (!range.perDay) return money(range.amount);
+    const days = Math.max(
+      1,
+      Math.ceil((asOf.getTime() - range.startDate.getTime()) / 86_400_000) + 1,
+    );
+    return days * money(range.amount);
+  }
+  return money(fineValue);
 }
 
 const assignmentInclude = {
   feeMaster: {
-    include: { feeType: true, feeGroup: true, academicSession: true },
+    include: {
+      feeType: true,
+      feeGroup: true,
+      academicSession: true,
+      fineRanges: { orderBy: { startDate: "asc" as const } },
+    },
   },
   discount: true,
   paymentItems: {
@@ -91,6 +137,7 @@ function toDue(assignment: Prisma.StudentFeeAssignmentGetPayload<{
     assignment.feeMaster.dueDate,
     assignment.feeMaster.graceDays,
     asOf,
+    assignment.feeMaster.fineRanges,
   );
   const paid = assignment.paymentItems.reduce(
     (sum, item) => sum + money(item.paidAmount),
@@ -142,6 +189,7 @@ export async function getFeeSetup(tenantId: string) {
       }),
       prisma.feeDiscount.findMany({
         where: tenantScope(tenantId, {}),
+        include: { _count: { select: { assignments: true } } },
         orderBy: { name: "asc" },
       }),
       prisma.feeReceiptBook.findMany({
@@ -163,6 +211,7 @@ export async function getFeeSetup(tenantId: string) {
                       admissionNumber: true,
                       firstName: true,
                       lastName: true,
+                      rteEnabled: true,
                     },
                   },
                 },
@@ -181,6 +230,7 @@ export async function getFeeSetup(tenantId: string) {
               feeType: true,
               feeGroup: true,
               classSection: { include: { academicClass: true, section: true } },
+              fineRanges: { orderBy: { startDate: "asc" } },
               _count: { select: { assignments: true } },
             },
             orderBy: { dueDate: "asc" },
@@ -309,7 +359,31 @@ export async function createFeeMaster(tenantId: string, input: FeeMasterInput) {
   if (!input.classSectionId && !input.isCustom) {
     throw new AppError(400, "A class section is required", "CLASS_SECTION_REQUIRED");
   }
-  return prisma.feeMaster.create({ data: { tenantId, ...input } });
+  const { fineRanges = [], ...masterData } = input;
+  return prisma.feeMaster.create({
+    data: {
+      tenantId,
+      ...masterData,
+      fineRanges: fineRanges.length
+        ? {
+            create: fineRanges.map((range) => ({
+              tenantId,
+              startDate: range.startDate,
+              endDate: range.endDate ?? null,
+              amount: range.amount,
+              perDay: range.perDay ?? false,
+            })),
+          }
+        : undefined,
+    },
+    include: {
+      feeType: true,
+      feeGroup: true,
+      classSection: { include: { academicClass: true, section: true } },
+      fineRanges: { orderBy: { startDate: "asc" } },
+      _count: { select: { assignments: true } },
+    },
+  });
 }
 
 export async function createCustomFee(
@@ -658,6 +732,7 @@ export async function updateFeeMaster(
     fineValue: input.fineValue ?? Number(existing.fineValue),
     graceDays: input.graceDays ?? existing.graceDays,
     isCustom: input.isCustom ?? existing.isCustom,
+    fineRanges: input.fineRanges,
   };
 
   if (next.fineType === FeeFineType.PERCENTAGE && next.fineValue > 100) {
@@ -694,15 +769,36 @@ export async function updateFeeMaster(
     throw new AppError(400, "A class section is required", "CLASS_SECTION_REQUIRED");
   }
 
-  return prisma.feeMaster.update({
-    where: { id },
-    data: next,
-    include: {
-      feeType: true,
-      feeGroup: true,
-      classSection: { include: { academicClass: true, section: true } },
-      _count: { select: { assignments: true } },
-    },
+  const { fineRanges, ...masterData } = next;
+  return prisma.$transaction(async (tx) => {
+    if (fineRanges !== undefined) {
+      await tx.feeFineRange.deleteMany({ where: { feeMasterId: id, tenantId } });
+    }
+    return tx.feeMaster.update({
+      where: { id },
+      data: {
+        ...masterData,
+        fineRanges:
+          fineRanges === undefined || !fineRanges.length
+            ? undefined
+            : {
+                create: fineRanges.map((range) => ({
+                  tenantId,
+                  startDate: range.startDate,
+                  endDate: range.endDate ?? null,
+                  amount: range.amount,
+                  perDay: range.perDay ?? false,
+                })),
+              },
+      },
+      include: {
+        feeType: true,
+        feeGroup: true,
+        classSection: { include: { academicClass: true, section: true } },
+        fineRanges: { orderBy: { startDate: "asc" } },
+        _count: { select: { assignments: true } },
+      },
+    });
   });
 }
 
@@ -786,6 +882,216 @@ export async function updateAssignmentDiscount(
     where: { id: assignmentId },
     data: { discountId },
   });
+}
+
+export async function createFeeInvoice(
+  tenantId: string,
+  userId: string,
+  input: InvoiceInput,
+) {
+  const uniqueIds = [...new Set(input.assignmentIds)];
+  if (!uniqueIds.length || uniqueIds.length !== input.assignmentIds.length) {
+    throw new AppError(400, "Select unique fee assignments", "INVALID_INVOICE_ITEMS");
+  }
+
+  return prisma.$transaction(
+    async (tx) => {
+      const [student, session, existingItem] = await Promise.all([
+        tx.student.findFirst({ where: tenantScope(tenantId, { id: input.studentId }) }),
+        tx.academicSession.findFirst({
+          where: tenantScope(tenantId, { id: input.academicSessionId }),
+        }),
+        tx.feeInvoiceItem.findFirst({
+          where: {
+            assignmentId: { in: uniqueIds },
+            invoice: {
+              tenantId,
+              status: { in: [FeeInvoiceStatus.DUE, FeeInvoiceStatus.OVERDUE] },
+            },
+          },
+          select: { id: true },
+        }),
+      ]);
+      if (!student || !session) {
+        throw new AppError(400, "Invoice references are invalid", "INVALID_INVOICE");
+      }
+      if (existingItem) {
+        throw new AppError(
+          409,
+          "One or more selected fees already have an open invoice",
+          "INVOICE_ALREADY_EXISTS",
+        );
+      }
+
+      const calculated = [];
+      for (const assignmentId of uniqueIds) {
+        const due = await getAssignmentDue(tx, tenantId, assignmentId, new Date());
+        const enrollment = await tx.studentEnrollment.findFirst({
+          where: tenantScope(tenantId, {
+            id: due.studentEnrollmentId,
+            studentId: input.studentId,
+            academicSessionId: input.academicSessionId,
+          }),
+        });
+        if (!enrollment || due.totals.balance <= 0) {
+          throw new AppError(
+            400,
+            "Invoice item does not belong to this student/session or has no balance",
+            "INVALID_INVOICE_ITEM",
+          );
+        }
+        calculated.push({ due, amount: due.totals.balance });
+      }
+
+      const subtotal = calculated.reduce((sum, row) => sum + row.due.totals.base, 0);
+      const discountAmount = calculated.reduce(
+        (sum, row) => sum + row.due.totals.discount,
+        0,
+      );
+      const fineAmount = calculated.reduce((sum, row) => sum + row.due.totals.fine, 0);
+      const total = calculated.reduce((sum, row) => sum + row.amount, 0);
+      const invoiceNumber = `INV-${new Date().getFullYear()}-${Date.now()
+        .toString()
+        .slice(-8)}`;
+
+      return tx.feeInvoice.create({
+        data: {
+          tenantId,
+          academicSessionId: input.academicSessionId,
+          studentId: input.studentId,
+          invoiceNumber,
+          dueDate: input.dueDate,
+          subtotal,
+          discountAmount,
+          fineAmount,
+          total,
+          note: input.note ?? null,
+          createdById: userId,
+          items: {
+            create: calculated.map(({ due, amount }) => ({
+              assignmentId: due.id,
+              description: due.feeMaster.feeType.name,
+              baseAmount: due.totals.base,
+              discount: due.totals.discount,
+              fine: due.totals.fine,
+              amount,
+            })),
+          },
+        },
+        include: {
+          student: true,
+          academicSession: true,
+          items: {
+            include: {
+              assignment: {
+                include: { feeMaster: { include: { feeType: true } } },
+              },
+            },
+          },
+        },
+      });
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+  );
+}
+
+export async function listFeeInvoices(
+  tenantId: string,
+  input: {
+    academicSessionId?: string;
+    status?: FeeInvoiceStatus;
+    query?: string;
+  },
+) {
+  const now = new Date();
+  await Promise.all([
+    prisma.feeInvoice.updateMany({
+      where: tenantScope(tenantId, {
+        status: FeeInvoiceStatus.DUE,
+        dueDate: { lt: now },
+      }),
+      data: { status: FeeInvoiceStatus.OVERDUE },
+    }),
+    prisma.feeInvoice.updateMany({
+      where: tenantScope(tenantId, {
+        status: FeeInvoiceStatus.OVERDUE,
+        dueDate: { gte: now },
+      }),
+      data: { status: FeeInvoiceStatus.DUE },
+    }),
+  ]);
+
+  const query = input.query?.trim();
+  return prisma.feeInvoice.findMany({
+    where: tenantScope(tenantId, {
+      ...(input.academicSessionId ? { academicSessionId: input.academicSessionId } : {}),
+      ...(input.status ? { status: input.status } : {}),
+      ...(query
+        ? {
+            OR: [
+              {
+                invoiceNumber: {
+                  contains: query,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                student: {
+                  admissionNumber: {
+                    contains: query,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+              },
+              {
+                student: {
+                  firstName: {
+                    contains: query,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+              },
+              {
+                student: {
+                  lastName: {
+                    contains: query,
+                    mode: Prisma.QueryMode.insensitive,
+                  },
+                },
+              },
+            ],
+          }
+        : {}),
+    }),
+    include: {
+      student: true,
+      academicSession: true,
+      items: {
+        include: {
+          assignment: {
+            include: { feeMaster: { include: { feeType: true, feeGroup: true } } },
+          },
+        },
+      },
+    },
+    orderBy: [{ createdAt: "desc" }],
+    take: 500,
+  });
+}
+
+export async function setFeeInvoiceStatus(
+  tenantId: string,
+  id: string,
+  status: FeeInvoiceStatus,
+) {
+  const invoice = await prisma.feeInvoice.findFirst({
+    where: tenantScope(tenantId, { id }),
+  });
+  if (!invoice) throw new AppError(404, "Invoice not found", "INVOICE_NOT_FOUND");
+  if (status === FeeInvoiceStatus.PAID && money(invoice.paidAmount) < money(invoice.total)) {
+    throw new AppError(409, "Invoice still has an outstanding balance", "INVOICE_NOT_PAID");
+  }
+  return prisma.feeInvoice.update({ where: { id }, data: { status } });
 }
 
 export async function listStudentFees(
@@ -917,7 +1223,7 @@ export async function collectPayment(
       const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
       const amount = calculated.reduce((sum, { item }) => sum + item.amount, 0);
 
-      return tx.feePayment.create({
+      const payment = await tx.feePayment.create({
         data: {
           tenantId,
           studentId: input.studentId,
@@ -953,6 +1259,46 @@ export async function collectPayment(
           },
         },
       });
+
+      const invoiceItems = await tx.feeInvoiceItem.findMany({
+        where: {
+          assignmentId: { in: calculated.map(({ item }) => item.assignmentId) },
+          invoice: {
+            tenantId,
+            status: { in: [FeeInvoiceStatus.DUE, FeeInvoiceStatus.OVERDUE] },
+          },
+        },
+        include: { invoice: true },
+      });
+      const paidByAssignment = new Map(
+        calculated.map(({ item }) => [item.assignmentId, item.amount]),
+      );
+      const increments = new Map<string, { amount: number; total: number; paid: number }>();
+      for (const invoiceItem of invoiceItems) {
+        const increment = paidByAssignment.get(invoiceItem.assignmentId) ?? 0;
+        const current = increments.get(invoiceItem.invoiceId) ?? {
+          amount: 0,
+          total: money(invoiceItem.invoice.total),
+          paid: money(invoiceItem.invoice.paidAmount),
+        };
+        current.amount += increment;
+        increments.set(invoiceItem.invoiceId, current);
+      }
+      for (const [invoiceId, values] of increments) {
+        const nextPaid = Math.min(values.total, values.paid + values.amount);
+        await tx.feeInvoice.update({
+          where: { id: invoiceId },
+          data: {
+            paidAmount: nextPaid,
+            status:
+              nextPaid >= values.total
+                ? FeeInvoiceStatus.PAID
+                : undefined,
+          },
+        });
+      }
+
+      return payment;
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
   );
@@ -994,14 +1340,50 @@ export async function revertPayment(
 ) {
   const payment = await prisma.feePayment.findFirst({
     where: tenantScope(tenantId, { id: paymentId }),
+    include: { items: true },
   });
   if (!payment) throw new AppError(404, "Payment not found", "PAYMENT_NOT_FOUND");
   if (payment.status === PaymentStatus.REVERTED) {
     throw new AppError(409, "Payment is already reverted", "PAYMENT_REVERTED");
   }
-  return prisma.feePayment.update({
-    where: { id: paymentId },
-    data: { status: PaymentStatus.REVERTED, revertedAt: new Date(), revertReason: reason },
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.feePayment.update({
+      where: { id: paymentId },
+      data: { status: PaymentStatus.REVERTED, revertedAt: new Date(), revertReason: reason },
+    });
+    const invoiceItems = await tx.feeInvoiceItem.findMany({
+      where: {
+        assignmentId: { in: payment.items.map((item) => item.assignmentId) },
+        invoice: { tenantId, status: { not: FeeInvoiceStatus.CANCELLED } },
+      },
+      include: { invoice: true },
+    });
+    const revertedByAssignment = new Map(
+      payment.items.map((item) => [item.assignmentId, money(item.paidAmount)]),
+    );
+    const decrements = new Map<string, number>();
+    for (const item of invoiceItems) {
+      decrements.set(
+        item.invoiceId,
+        (decrements.get(item.invoiceId) ?? 0) +
+          (revertedByAssignment.get(item.assignmentId) ?? 0),
+      );
+    }
+    for (const [invoiceId, decrement] of decrements) {
+      const invoice = invoiceItems.find((item) => item.invoiceId === invoiceId)!.invoice;
+      const nextPaid = Math.max(0, money(invoice.paidAmount) - decrement);
+      await tx.feeInvoice.update({
+        where: { id: invoiceId },
+        data: {
+          paidAmount: nextPaid,
+          status:
+            invoice.dueDate < new Date()
+              ? FeeInvoiceStatus.OVERDUE
+              : FeeInvoiceStatus.DUE,
+        },
+      });
+    }
+    return updated;
   });
 }
 
@@ -1017,13 +1399,44 @@ export async function getFeeSummary(
     }),
     include: {
       ...assignmentInclude,
-      studentEnrollment: { include: { student: true } },
+      studentEnrollment: {
+        include: {
+          student: {
+            select: {
+              id: true,
+              admissionNumber: true,
+              firstName: true,
+              lastName: true,
+              guardianPhone: true,
+              fatherPhone: true,
+              motherPhone: true,
+            },
+          },
+        },
+      },
     },
   });
-  const dues = assignments.map((assignment) => ({
-    ...toDue(assignment, asOf),
-    student: assignment.studentEnrollment.student,
-  }));
+  const dues = assignments.map((assignment) => {
+    const student = assignment.studentEnrollment.student;
+    const parentContact =
+      student.guardianPhone?.trim() ||
+      student.fatherPhone?.trim() ||
+      student.motherPhone?.trim() ||
+      null;
+    return {
+      ...toDue(assignment, asOf),
+      student: {
+        id: student.id,
+        admissionNumber: student.admissionNumber,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        guardianPhone: student.guardianPhone,
+        fatherPhone: student.fatherPhone,
+        motherPhone: student.motherPhone,
+        parentContact,
+      },
+    };
+  });
   const totals = dues.reduce(
     (sum, item) => ({
       assigned: sum.assigned + item.totals.base,
@@ -1044,6 +1457,7 @@ export async function carryForwardPreviousDues(
     targetEnrollmentId: string;
     dueDate: Date;
     asOf?: Date;
+    amount?: number;
   },
 ) {
   const targetEnrollment = await prisma.studentEnrollment.findFirst({
@@ -1062,10 +1476,11 @@ export async function carryForwardPreviousDues(
     }),
     include: assignmentInclude,
   });
-  const amount = previousAssignments.reduce(
+  const calculatedAmount = previousAssignments.reduce(
     (sum, assignment) => sum + toDue(assignment, input.asOf ?? new Date()).totals.balance,
     0,
   );
+  const amount = input.amount ?? calculatedAmount;
   if (amount <= 0) {
     throw new AppError(409, "No previous-session balance to carry forward", "NO_BALANCE_DUE");
   }

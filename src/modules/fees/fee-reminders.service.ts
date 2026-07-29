@@ -1,4 +1,4 @@
-import { Prisma, UserStatus } from "@prisma/client";
+import { NotificationType, Prisma, UserStatus } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
@@ -127,6 +127,64 @@ export async function runFeeRemindersNow(tenantId: string, actorUserId: string, 
   });
 
   return { ...result, sessionId: session.id, sessionName: session.name };
+}
+
+export async function sendStudentFeeReminder(
+  tenantId: string,
+  actorUserId: string,
+  studentId: string,
+  sessionId?: string,
+) {
+  const session = sessionId
+    ? await prisma.academicSession.findFirst({
+        where: tenantScope(tenantId, { id: sessionId }),
+        select: { id: true, name: true },
+      })
+    : await prisma.academicSession.findFirst({
+        where: tenantScope(tenantId, { isCurrent: true }),
+        select: { id: true, name: true },
+      });
+  if (!session) throw new AppError(404, "Academic session not found", "SESSION_NOT_FOUND");
+
+  const student = await prisma.student.findFirst({
+    where: tenantScope(tenantId, { id: studentId }),
+    select: { id: true },
+  });
+  if (!student) throw new AppError(404, "Student not found", "STUDENT_NOT_FOUND");
+
+  const setting = await prisma.tenantFeeSetting.upsert({
+    where: { tenantId },
+    create: { tenantId },
+    update: {},
+  });
+  const result = await sendFeeRemindersForSession(tenantId, actorUserId, session.id, {
+    mode: "all_due",
+    studentId,
+    sendEmail: setting.reminderEmailEnabled !== false,
+    sendSms: setting.reminderSmsEnabled !== false,
+    minBalance: 0,
+    title: "Fee payment reminder",
+  });
+  return { ...result, studentId, sessionId: session.id, sessionName: session.name };
+}
+
+export async function getFeeReminderStats(tenantId: string) {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const [sentMtd, lastSent] = await Promise.all([
+    prisma.notification.count({
+      where: tenantScope(tenantId, {
+        type: NotificationType.FEE_OVERDUE,
+        createdAt: { gte: monthStart },
+      }),
+    }),
+    prisma.notification.findFirst({
+      where: tenantScope(tenantId, { type: NotificationType.FEE_OVERDUE }),
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  return { sentMtd, lastSentAt: lastSent?.createdAt ?? null };
 }
 
 function parseSteps(setting: {
