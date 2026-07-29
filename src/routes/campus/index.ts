@@ -80,6 +80,7 @@ import {
   createFeeDiscountController,
   createFeeGroupController,
   createFeeMasterController,
+  createCustomFeeController,
   createFeeTypeController,
   createReceiptBookController,
   deleteFeeDiscountController,
@@ -92,6 +93,7 @@ import {
   listStudentFeesController,
   revertPaymentController,
   searchPaymentsController,
+  setCustomFeeActiveController,
   updateAssignmentDiscountController,
   updateFeeDiscountController,
   updateFeeGroupController,
@@ -535,6 +537,18 @@ campusRouter.post(
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(createFeeMasterController),
+);
+campusRouter.post(
+  "/fees/custom",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(createCustomFeeController),
+);
+campusRouter.put(
+  "/fees/custom/:id/active",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(setCustomFeeActiveController),
 );
 campusRouter.put(
   "/fees/masters/:id",

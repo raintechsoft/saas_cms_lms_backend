@@ -12,6 +12,7 @@ import {
   createFeeDiscount,
   createFeeGroup,
   createFeeMaster,
+  createCustomFee,
   createFeeType,
   createReceiptBook,
   deleteFeeDiscount,
@@ -24,6 +25,7 @@ import {
   listStudentFees,
   revertPayment,
   searchPayments,
+  setCustomFeeActive,
   updateAssignmentDiscount,
   updateFeeDiscount,
   updateFeeGroup,
@@ -89,6 +91,18 @@ const feeMasterBody = z.object({
   isCustom: z.boolean().default(false),
 });
 const feeMasterUpdateBody = feeMasterBody.partial();
+const customFeeBody = z.object({
+  name: z.string().trim().min(1).max(100),
+  amount: z.coerce.number().positive(),
+  description: z.string().trim().max(1000).nullable().optional(),
+  target: z.enum(["ALL", "INDIVIDUAL", "CLASS"]),
+  classSectionId: z.string().min(1).nullable().optional(),
+  academicSessionId: z.string().min(1).optional(),
+  dueDate: z.coerce.date().optional(),
+});
+const customFeeActiveBody = z.object({
+  isActive: z.boolean(),
+});
 const assignmentBody = z.object({
   enrollmentIds: z.array(z.string().min(1)).min(1).optional(),
 });
@@ -237,6 +251,20 @@ export async function deleteReceiptBookController(req: Request, res: Response) {
 export async function createFeeMasterController(req: Request, res: Response) {
   res.status(201).json({
     data: await createFeeMaster(req.auth!.tenantId!, feeMasterBody.parse(req.body)),
+  });
+}
+
+export async function createCustomFeeController(req: Request, res: Response) {
+  res.status(201).json({
+    data: await createCustomFee(req.auth!.tenantId!, customFeeBody.parse(req.body)),
+  });
+}
+
+export async function setCustomFeeActiveController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const { isActive } = customFeeActiveBody.parse(req.body);
+  res.json({
+    data: await setCustomFeeActive(req.auth!.tenantId!, id, isActive),
   });
 }
 

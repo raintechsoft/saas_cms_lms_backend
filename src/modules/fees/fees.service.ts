@@ -312,6 +312,124 @@ export async function createFeeMaster(tenantId: string, input: FeeMasterInput) {
   return prisma.feeMaster.create({ data: { tenantId, ...input } });
 }
 
+export async function createCustomFee(
+  tenantId: string,
+  input: {
+    name: string;
+    amount: number;
+    description?: string | null;
+    target: "ALL" | "INDIVIDUAL" | "CLASS";
+    classSectionId?: string | null;
+    academicSessionId?: string;
+    dueDate?: Date;
+  },
+) {
+  const session =
+    (input.academicSessionId
+      ? await prisma.academicSession.findFirst({
+          where: tenantScope(tenantId, { id: input.academicSessionId }),
+        })
+      : null) ??
+    (await prisma.academicSession.findFirst({
+      where: tenantScope(tenantId, { isCurrent: true }),
+    }));
+  if (!session) throw new AppError(400, "No academic session found", "SESSION_NOT_FOUND");
+
+  if (input.target === "CLASS") {
+    if (!input.classSectionId) {
+      throw new AppError(400, "Class section is required", "CLASS_SECTION_REQUIRED");
+    }
+    const classSection = await prisma.classSection.findFirst({
+      where: tenantScope(tenantId, {
+        id: input.classSectionId,
+        academicSessionId: session.id,
+      }),
+    });
+    if (!classSection) {
+      throw new AppError(400, "Invalid class section", "INVALID_CLASS_SECTION");
+    }
+  }
+
+  const dueDate =
+    input.dueDate ??
+    (() => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() + 30);
+      return d;
+    })();
+
+  const codePrefix =
+    input.target === "ALL"
+      ? "CUSTOM_ALL"
+      : input.target === "INDIVIDUAL"
+        ? "CUSTOM_IND"
+        : "CUSTOM_CLS";
+
+  return prisma.$transaction(async (tx) => {
+    const feeType = await tx.feeType.create({
+      data: {
+        tenantId,
+        name: input.name.trim(),
+        code: `${codePrefix}_${Date.now().toString(36).toUpperCase()}`,
+        description: input.description?.trim() || null,
+        isActive: true,
+      },
+    });
+
+    const feeGroup = await tx.feeGroup.upsert({
+      where: { tenantId_name: { tenantId, name: "Custom Fees" } },
+      update: {},
+      create: {
+        tenantId,
+        name: "Custom Fees",
+        description: "Individually configured custom fee categories",
+      },
+    });
+
+    await tx.feeGroupItem.upsert({
+      where: {
+        feeGroupId_feeTypeId: { feeGroupId: feeGroup.id, feeTypeId: feeType.id },
+      },
+      update: {},
+      create: { feeGroupId: feeGroup.id, feeTypeId: feeType.id },
+    });
+
+    return tx.feeMaster.create({
+      data: {
+        tenantId,
+        academicSessionId: session.id,
+        classSectionId: input.target === "CLASS" ? input.classSectionId! : null,
+        feeGroupId: feeGroup.id,
+        feeTypeId: feeType.id,
+        amount: input.amount,
+        dueDate,
+        fineType: FeeFineType.NONE,
+        fineValue: 0,
+        graceDays: 0,
+        isCustom: true,
+      },
+      include: {
+        feeType: true,
+        feeGroup: true,
+        classSection: { include: { academicClass: true, section: true } },
+        _count: { select: { assignments: true } },
+      },
+    });
+  });
+}
+
+export async function setCustomFeeActive(tenantId: string, masterId: string, isActive: boolean) {
+  const master = await requireFeeMaster(tenantId, masterId);
+  if (!master.isCustom) {
+    throw new AppError(400, "Only custom fees can be toggled here", "NOT_CUSTOM_FEE");
+  }
+  await prisma.feeType.update({
+    where: { id: master.feeTypeId },
+    data: { isActive },
+  });
+  return requireFeeMaster(tenantId, masterId);
+}
+
 async function requireFeeType(tenantId: string, id: string) {
   const row = await prisma.feeType.findFirst({ where: tenantScope(tenantId, { id }) });
   if (!row) throw new AppError(404, "Fee type not found", "FEE_TYPE_NOT_FOUND");
