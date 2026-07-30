@@ -771,3 +771,158 @@ export async function promoteStudents(
     };
   });
 }
+
+/** Move ACTIVE enrollments between class sections in the same session (typically same class, different section). */
+export async function bulkUpdateStudentSections(
+  tenantId: string,
+  input: {
+    fromClassSectionId: string;
+    toClassSectionId: string;
+    items: Array<{
+      studentEnrollmentId: string;
+      rollNumber?: string | null;
+    }>;
+  },
+) {
+  if (input.fromClassSectionId === input.toClassSectionId) {
+    throw new AppError(400, "Source and target class sections must be different", "SAME_CLASS_SECTION");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const [fromClassSection, toClassSection, tenant] = await Promise.all([
+      tx.classSection.findFirst({
+        where: tenantScope(tenantId, { id: input.fromClassSectionId }),
+        select: {
+          id: true,
+          classId: true,
+          sectionId: true,
+          academicSessionId: true,
+          academicClass: { select: { name: true } },
+          section: { select: { name: true } },
+        },
+      }),
+      tx.classSection.findFirst({
+        where: tenantScope(tenantId, { id: input.toClassSectionId }),
+        select: {
+          id: true,
+          classId: true,
+          sectionId: true,
+          academicSessionId: true,
+          academicClass: { select: { name: true } },
+          section: { select: { name: true } },
+        },
+      }),
+      tx.tenant.findUnique({
+        where: { id: tenantId },
+        select: { type: true },
+      }),
+    ]);
+
+    if (!fromClassSection) throw new AppError(404, "Source class section not found", "FROM_CLASS_SECTION_NOT_FOUND");
+    if (!toClassSection) throw new AppError(404, "Target class section not found", "TO_CLASS_SECTION_NOT_FOUND");
+    if (!tenant) throw new AppError(404, "Tenant not found", "TENANT_NOT_FOUND");
+
+    if (fromClassSection.academicSessionId !== toClassSection.academicSessionId) {
+      throw new AppError(
+        400,
+        "Source and target must be in the same academic session (use Promote for next session)",
+        "SESSION_MISMATCH",
+      );
+    }
+
+    if (fromClassSection.classId !== toClassSection.classId) {
+      throw new AppError(
+        400,
+        "Bulk section update only moves students within the same class. Use Promote to change class.",
+        "CLASS_MISMATCH",
+      );
+    }
+
+    let moved = 0;
+
+    for (const item of input.items) {
+      const enrollment = await tx.studentEnrollment.findFirst({
+        where: tenantScope(tenantId, {
+          id: item.studentEnrollmentId,
+          classSectionId: fromClassSection.id,
+          status: EnrollmentStatus.ACTIVE,
+        }),
+        select: {
+          id: true,
+          studentId: true,
+          academicSessionId: true,
+          rollNumber: true,
+        },
+      });
+
+      if (!enrollment) {
+        throw new AppError(404, "Active student enrollment not found in source section", "ENROLLMENT_NOT_FOUND");
+      }
+
+      const existingTarget = await tx.studentEnrollment.findFirst({
+        where: tenantScope(tenantId, {
+          studentId: enrollment.studentId,
+          academicSessionId: enrollment.academicSessionId,
+          classSectionId: toClassSection.id,
+        }),
+        select: { id: true, status: true },
+      });
+
+      if (existingTarget) {
+        throw new AppError(
+          409,
+          "Student already has an enrollment in the target section",
+          "TARGET_ENROLLMENT_EXISTS",
+        );
+      }
+
+      // Non-coaching: block if another ACTIVE enrollment already exists outside source (shouldn't for same class move).
+      if (tenant.type !== TenantType.COACHING_CENTER) {
+        const otherActive = await tx.studentEnrollment.findFirst({
+          where: tenantScope(tenantId, {
+            studentId: enrollment.studentId,
+            academicSessionId: enrollment.academicSessionId,
+            status: EnrollmentStatus.ACTIVE,
+            NOT: { id: enrollment.id },
+          }),
+          select: { id: true },
+        });
+        if (otherActive) {
+          throw new AppError(
+            409,
+            "Only coaching centers can enroll a student in multiple classes per session",
+            "MULTI_CLASS_NOT_ALLOWED",
+          );
+        }
+      }
+
+      const nextRoll =
+        item.rollNumber === undefined ? enrollment.rollNumber : item.rollNumber === "" ? null : item.rollNumber;
+
+      await tx.studentEnrollment.update({
+        where: { id: enrollment.id },
+        data: {
+          classSectionId: toClassSection.id,
+          rollNumber: nextRoll,
+        },
+      });
+
+      // Keep denormalized attendance section in sync with the enrollment.
+      await tx.attendanceRecord.updateMany({
+        where: tenantScope(tenantId, { studentEnrollmentId: enrollment.id }),
+        data: { classSectionId: toClassSection.id },
+      });
+
+      moved += 1;
+    }
+
+    return {
+      fromClassSectionId: fromClassSection.id,
+      toClassSectionId: toClassSection.id,
+      fromLabel: `${fromClassSection.academicClass.name} · ${fromClassSection.section.name}`,
+      toLabel: `${toClassSection.academicClass.name} · ${toClassSection.section.name}`,
+      total: input.items.length,
+      moved,
+    };
+  });
+}

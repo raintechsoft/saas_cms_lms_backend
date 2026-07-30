@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import {
   assignSubject,
+  bulkUpdateStudentSections,
   createClass,
   createClassSection,
   createElectiveCategory,
@@ -117,6 +118,19 @@ const promotionBody = z.object({
     .min(1),
 });
 
+const bulkSectionBody = z.object({
+  fromClassSectionId: z.string().min(1),
+  toClassSectionId: z.string().min(1),
+  items: z
+    .array(
+      z.object({
+        studentEnrollmentId: z.string().min(1),
+        rollNumber: z.string().trim().max(30).nullable().optional(),
+      }),
+    )
+    .min(1),
+});
+
 export async function getAcademicSetupController(req: Request, res: Response) {
   const { sessionId } = setupQuery.parse(req.query);
   res.json({ data: await getAcademicSetup(req.auth!.tenantId!, sessionId) });
@@ -198,6 +212,11 @@ export async function promoteStudentsController(req: Request, res: Response) {
     req.auth!.userId,
     promotionBody.parse(req.body),
   );
+  res.json({ data: result });
+}
+
+export async function bulkUpdateStudentSectionsController(req: Request, res: Response) {
+  const result = await bulkUpdateStudentSections(req.auth!.tenantId!, bulkSectionBody.parse(req.body));
   res.json({ data: result });
 }
 

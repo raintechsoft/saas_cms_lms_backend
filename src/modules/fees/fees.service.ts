@@ -313,7 +313,7 @@ export function createFeeDiscount(
 
 export async function createReceiptBook(
   tenantId: string,
-  input: { name: string; prefix: string; isDefault: boolean },
+  input: { name: string; prefix: string; nextNumber?: number; isDefault: boolean },
 ) {
   return prisma.$transaction(async (tx) => {
     if (input.isDefault) {
@@ -322,7 +322,15 @@ export async function createReceiptBook(
         data: { isDefault: false },
       });
     }
-    return tx.feeReceiptBook.create({ data: { tenantId, ...input } });
+    return tx.feeReceiptBook.create({
+      data: {
+        tenantId,
+        name: input.name,
+        prefix: input.prefix,
+        nextNumber: input.nextNumber ?? 1,
+        isDefault: input.isDefault,
+      },
+    });
   });
 }
 
@@ -682,7 +690,7 @@ export async function deleteFeeDiscount(tenantId: string, id: string) {
 export async function updateReceiptBook(
   tenantId: string,
   id: string,
-  input: { name?: string; prefix?: string; isDefault?: boolean },
+  input: { name?: string; prefix?: string; nextNumber?: number; isDefault?: boolean },
 ) {
   await requireReceiptBook(tenantId, id);
   return prisma.$transaction(async (tx) => {
@@ -697,6 +705,7 @@ export async function updateReceiptBook(
       data: {
         name: input.name,
         prefix: input.prefix,
+        nextNumber: input.nextNumber,
         isDefault: input.isDefault,
       },
     });
@@ -950,9 +959,22 @@ export async function createFeeInvoice(
       );
       const fineAmount = calculated.reduce((sum, row) => sum + row.due.totals.fine, 0);
       const total = calculated.reduce((sum, row) => sum + row.amount, 0);
-      const invoiceNumber = `INV-${new Date().getFullYear()}-${Date.now()
-        .toString()
-        .slice(-8)}`;
+      const year = new Date().getFullYear();
+      const latest = await tx.feeInvoice.findFirst({
+        where: {
+          tenantId,
+          invoiceNumber: { startsWith: `INV-${year}-` },
+        },
+        orderBy: { invoiceNumber: "desc" },
+        select: { invoiceNumber: true },
+      });
+      let nextSeq = 1;
+      if (latest?.invoiceNumber) {
+        const part = latest.invoiceNumber.split("-").pop();
+        const parsed = Number(part);
+        if (Number.isFinite(parsed)) nextSeq = parsed + 1;
+      }
+      const invoiceNumber = `INV-${year}-${String(nextSeq).padStart(6, "0")}`;
 
       return tx.feeInvoice.create({
         data: {
@@ -1077,6 +1099,25 @@ export async function listFeeInvoices(
     orderBy: [{ createdAt: "desc" }],
     take: 500,
   });
+}
+
+export async function getFeeInvoice(tenantId: string, id: string) {
+  const invoice = await prisma.feeInvoice.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: {
+      student: true,
+      academicSession: true,
+      items: {
+        include: {
+          assignment: {
+            include: { feeMaster: { include: { feeType: true, feeGroup: true } } },
+          },
+        },
+      },
+    },
+  });
+  if (!invoice) throw new AppError(404, "Invoice not found", "INVOICE_NOT_FOUND");
+  return invoice;
 }
 
 export async function setFeeInvoiceStatus(
@@ -1331,6 +1372,28 @@ export async function searchPayments(tenantId: string, query?: string) {
     orderBy: [{ paymentDate: "desc" }, { createdAt: "desc" }],
     take: 100,
   });
+}
+
+export async function getFeePayment(tenantId: string, id: string) {
+  const payment = await prisma.feePayment.findFirst({
+    where: tenantScope(tenantId, {
+      OR: [{ id }, { paymentId: id }],
+    }),
+    include: {
+      student: true,
+      academicSession: true,
+      createdBy: { select: { firstName: true, lastName: true } },
+      items: {
+        include: {
+          assignment: {
+            include: { feeMaster: { include: { feeType: true } } },
+          },
+        },
+      },
+    },
+  });
+  if (!payment) throw new AppError(404, "Payment not found", "PAYMENT_NOT_FOUND");
+  return payment;
 }
 
 export async function revertPayment(

@@ -22,6 +22,7 @@ import {
 } from "../../modules/access/access.controller.js";
 import {
   assignSubjectController,
+  bulkUpdateStudentSectionsController,
   createClassController,
   createClassSectionController,
   createElectiveCategoryController,
@@ -98,6 +99,8 @@ import {
   getFeeSetupController,
   getFeeReminderStatsController,
   getFeeSummaryController,
+  getFeeInvoiceController,
+  getFeePaymentController,
   listStudentFeesController,
   listFeeInvoicesController,
   revertPaymentController,
@@ -396,6 +399,11 @@ campusRouter.post(
   asyncHandler(promoteStudentsController),
 );
 campusRouter.post(
+  "/academics/bulk-section",
+  requirePermission("academics.manage"),
+  asyncHandler(bulkUpdateStudentSectionsController),
+);
+campusRouter.post(
   "/academics/elective-categories",
   requirePermission("academics.manage"),
   asyncHandler(createElectiveCategoryController),
@@ -635,6 +643,12 @@ campusRouter.get(
   requirePermission("fees.view"),
   asyncHandler(searchPaymentsController),
 );
+campusRouter.get(
+  "/fees/payments/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(getFeePaymentController),
+);
 campusRouter.post(
   "/fees/invoices",
   requireEntitlement("CMS"),
@@ -646,6 +660,12 @@ campusRouter.get(
   requireEntitlement("CMS"),
   requirePermission("fees.view"),
   asyncHandler(listFeeInvoicesController),
+);
+campusRouter.get(
+  "/fees/invoices/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(getFeeInvoiceController),
 );
 campusRouter.put(
   "/fees/invoices/:id/status",

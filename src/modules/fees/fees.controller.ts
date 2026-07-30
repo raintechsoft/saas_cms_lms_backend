@@ -22,6 +22,8 @@ import {
   deleteFeeMaster,
   deleteFeeType,
   deleteReceiptBook,
+  getFeeInvoice,
+  getFeePayment,
   getFeeSetup,
   getFeeSummary,
   listFeeInvoices,
@@ -77,11 +79,13 @@ const discountUpdateBody = discountBody.partial().extend({
 const receiptBookBody = z.object({
   name: z.string().trim().min(1).max(100),
   prefix: z.string().trim().min(1).max(20),
+  nextNumber: z.coerce.number().int().min(1).max(999999).default(1),
   isDefault: z.boolean().default(false),
 });
 const receiptBookUpdateBody = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   prefix: z.string().trim().min(1).max(20).optional(),
+  nextNumber: z.coerce.number().int().min(1).max(999999).optional(),
   isDefault: z.boolean().optional(),
 });
 const feeMasterBody = z.object({
@@ -347,6 +351,11 @@ export async function collectPaymentController(req: Request, res: Response) {
   res.status(201).json({ data });
 }
 
+export async function getFeePaymentController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getFeePayment(req.auth!.tenantId!, id) });
+}
+
 export async function searchPaymentsController(req: Request, res: Response) {
   const { query } = paymentSearchQuery.parse(req.query);
   res.json({ data: await searchPayments(req.auth!.tenantId!, query) });
@@ -366,6 +375,11 @@ export async function listFeeInvoicesController(req: Request, res: Response) {
   res.json({
     data: await listFeeInvoices(req.auth!.tenantId!, invoiceQuery.parse(req.query)),
   });
+}
+
+export async function getFeeInvoiceController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getFeeInvoice(req.auth!.tenantId!, id) });
 }
 
 export async function setFeeInvoiceStatusController(req: Request, res: Response) {
