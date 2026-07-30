@@ -21,26 +21,42 @@ import {
   updateUserController,
 } from "../../modules/access/access.controller.js";
 import {
+  applyAcademicBulkUpdateController,
   assignSubjectController,
   bulkUpdateStudentSectionsController,
+  createAcademicsTimetableEntryController,
   createClassController,
   createClassSectionController,
   createElectiveCategoryController,
+  createSchoolScholarController,
   createSectionController,
   createSessionController,
   createSubjectController,
+  createSubjectGroupController,
   deleteAcademicRecordController,
+  deleteAcademicsTimetableEntryController,
   deleteElectiveCategoryController,
+  deleteSchoolScholarController,
+  deleteSubjectGroupController,
+  getAcademicReportCatalogController,
   getAcademicSetupController,
+  getAcademicsTimetableSetupController,
   getElectiveAssignmentBoardController,
+  getPromoteBoardController,
+  listSchoolScholarsController,
+  listSubjectGroupsController,
   promoteStudentsController,
+  runAcademicReportController,
   saveStudentElectivesController,
   setCurrentSessionController,
+  updateAcademicsTimetableEntryController,
   updateClassController,
   updateClassSectionController,
   updateElectiveCategoryController,
+  updateSchoolScholarController,
   updateSectionController,
   updateSubjectController,
+  updateSubjectGroupController,
 } from "../../modules/academics/academics.controller.js";
 import {
   acceptOnlineAdmissionController,
@@ -387,21 +403,26 @@ campusRouter.post(
   requirePermission("academics.manage"),
   asyncHandler(assignSubjectController),
 );
-campusRouter.delete(
-  "/academics/:resource/:id",
-  requirePermission("academics.manage"),
-  asyncHandler(deleteAcademicRecordController),
-);
 
 campusRouter.post(
   "/academics/promote",
   requirePermission("academics.manage"),
   asyncHandler(promoteStudentsController),
 );
+campusRouter.get(
+  "/academics/promote/board",
+  requirePermission("academics.view"),
+  asyncHandler(getPromoteBoardController),
+);
 campusRouter.post(
   "/academics/bulk-section",
   requirePermission("academics.manage"),
   asyncHandler(bulkUpdateStudentSectionsController),
+);
+campusRouter.post(
+  "/academics/bulk-update",
+  requirePermission("academics.manage"),
+  asyncHandler(applyAcademicBulkUpdateController),
 );
 campusRouter.post(
   "/academics/elective-categories",
@@ -427,6 +448,86 @@ campusRouter.put(
   "/academics/electives/assignments",
   requirePermission("academics.manage"),
   asyncHandler(saveStudentElectivesController),
+);
+
+campusRouter.get(
+  "/academics/subject-groups",
+  requirePermission("academics.view"),
+  asyncHandler(listSubjectGroupsController),
+);
+campusRouter.post(
+  "/academics/subject-groups",
+  requirePermission("academics.manage"),
+  asyncHandler(createSubjectGroupController),
+);
+campusRouter.put(
+  "/academics/subject-groups/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateSubjectGroupController),
+);
+campusRouter.delete(
+  "/academics/subject-groups/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(deleteSubjectGroupController),
+);
+
+campusRouter.get(
+  "/academics/scholars",
+  requirePermission("academics.view"),
+  asyncHandler(listSchoolScholarsController),
+);
+campusRouter.post(
+  "/academics/scholars",
+  requirePermission("academics.manage"),
+  asyncHandler(createSchoolScholarController),
+);
+campusRouter.put(
+  "/academics/scholars/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateSchoolScholarController),
+);
+campusRouter.delete(
+  "/academics/scholars/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(deleteSchoolScholarController),
+);
+
+campusRouter.get(
+  "/academics/reports/catalog",
+  requirePermission("academics.view"),
+  asyncHandler(getAcademicReportCatalogController),
+);
+campusRouter.get(
+  "/academics/reports/run",
+  requirePermission("academics.view"),
+  asyncHandler(runAcademicReportController),
+);
+
+campusRouter.get(
+  "/academics/timetable/setup",
+  requirePermission("academics.view"),
+  asyncHandler(getAcademicsTimetableSetupController),
+);
+campusRouter.post(
+  "/academics/timetable/entries",
+  requirePermission("academics.manage"),
+  asyncHandler(createAcademicsTimetableEntryController),
+);
+campusRouter.put(
+  "/academics/timetable/entries/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(updateAcademicsTimetableEntryController),
+);
+campusRouter.delete(
+  "/academics/timetable/entries/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(deleteAcademicsTimetableEntryController),
+);
+
+campusRouter.delete(
+  "/academics/:resource/:id",
+  requirePermission("academics.manage"),
+  asyncHandler(deleteAcademicRecordController),
 );
 
 campusRouter.get(

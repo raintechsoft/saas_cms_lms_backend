@@ -1,6 +1,7 @@
 import {
   EnrollmentStatus,
   StudentStatus,
+  SubjectDeliveryType,
   SubjectType,
   TenantType,
   UserStatus,
@@ -9,6 +10,7 @@ import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { ensureTenantRoles } from "../../lib/tenant-bootstrap.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
+import { listSubjectGroups } from "./academics-extensions.service.js";
 
 export async function getAcademicSetup(tenantId: string, sessionId?: string) {
   await ensureTenantRoles(tenantId);
@@ -20,7 +22,7 @@ export async function getAcademicSetup(tenantId: string, sessionId?: string) {
         where: tenantScope(tenantId, { isCurrent: true }),
       });
 
-  const [sessions, classes, sections, subjects, teachers, classSections, teacherRole, electiveCategories] =
+  const [sessions, classes, sections, subjects, teachers, classSections, teacherRole, electiveCategories, subjectGroups] =
     await Promise.all([
       prisma.academicSession.findMany({
         where: tenantScope(tenantId, {}),
@@ -86,6 +88,7 @@ export async function getAcademicSetup(tenantId: string, sessionId?: string) {
         },
         orderBy: { name: "asc" },
       }),
+      listSubjectGroups(tenantId),
     ]);
 
   return {
@@ -98,6 +101,7 @@ export async function getAcademicSetup(tenantId: string, sessionId?: string) {
     classSections,
     teacherRoleId: teacherRole?.id ?? null,
     electiveCategories,
+    subjectGroups,
   };
 }
 
@@ -180,6 +184,7 @@ export async function createSubject(
     name: string;
     code?: string | null;
     type?: SubjectType;
+    deliveryType?: SubjectDeliveryType;
     electiveCategoryId?: string | null;
   },
 ) {
@@ -199,6 +204,7 @@ export async function createSubject(
       name: input.name,
       code: input.code,
       type,
+      deliveryType: input.deliveryType ?? SubjectDeliveryType.THEORY,
       electiveCategoryId,
     },
     include: { electiveCategory: { select: { id: true, name: true, maxSelect: true } } },
@@ -212,6 +218,7 @@ export async function updateSubject(
     name?: string;
     code?: string | null;
     type?: SubjectType;
+    deliveryType?: SubjectDeliveryType;
     electiveCategoryId?: string | null;
   },
 ) {
@@ -232,6 +239,7 @@ export async function updateSubject(
       name: input.name,
       code: input.code,
       type: input.type,
+      deliveryType: input.deliveryType,
       ...(input.electiveCategoryId !== undefined || nextType === SubjectType.CORE
         ? { electiveCategoryId }
         : {}),
@@ -595,6 +603,49 @@ export async function deleteScopedRecord(
   resource: "classes" | "sections" | "subjects" | "class-sections" | "subject-assignments",
   id: string,
 ) {
+  if (resource === "classes") {
+    const linked = await prisma.classSection.count({ where: tenantScope(tenantId, { classId: id }) });
+    if (linked) {
+      throw new AppError(409, "Class has linked class sections and cannot be deleted", "CLASS_IN_USE");
+    }
+  }
+  if (resource === "sections") {
+    const linked = await prisma.classSection.count({ where: tenantScope(tenantId, { sectionId: id }) });
+    if (linked) {
+      throw new AppError(409, "Section has linked class sections and cannot be deleted", "SECTION_IN_USE");
+    }
+  }
+  if (resource === "subjects") {
+    const [assignments, electives, groupItems] = await Promise.all([
+      prisma.classSubject.count({ where: tenantScope(tenantId, { subjectId: id }) }),
+      prisma.studentElectiveAssignment.count({ where: tenantScope(tenantId, { subjectId: id }) }),
+      prisma.subjectGroupItem.count({
+        where: { classSubject: { tenantId, subjectId: id } },
+      }),
+    ]);
+    if (assignments || electives || groupItems) {
+      throw new AppError(409, "Subject is in use and cannot be deleted", "SUBJECT_IN_USE");
+    }
+  }
+  if (resource === "class-sections") {
+    const [enrollments, timetable] = await Promise.all([
+      prisma.studentEnrollment.count({ where: tenantScope(tenantId, { classSectionId: id }) }),
+      prisma.timetableEntry.count({ where: tenantScope(tenantId, { classSectionId: id }) }),
+    ]);
+    if (enrollments || timetable) {
+      throw new AppError(409, "Class section has enrollments or timetable entries", "CLASS_SECTION_IN_USE");
+    }
+  }
+  if (resource === "subject-assignments") {
+    const [timetable, groupItems] = await Promise.all([
+      prisma.timetableEntry.count({ where: tenantScope(tenantId, { classSubjectId: id }) }),
+      prisma.subjectGroupItem.count({ where: { classSubjectId: id } }),
+    ]);
+    if (timetable || groupItems) {
+      throw new AppError(409, "Subject assignment is used by timetable or subject groups", "SUBJECT_ASSIGNMENT_IN_USE");
+    }
+  }
+
   const delegates = {
     classes: prisma.academicClass,
     sections: prisma.section,
