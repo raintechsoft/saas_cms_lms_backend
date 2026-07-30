@@ -17,6 +17,9 @@ export interface UpdateSettingsInput {
   examResultType?: ExamResultType;
   onlineAdmission?: boolean;
   liveClassAutoAttendance?: boolean;
+  attendancePresentPoints?: number;
+  attendanceHalfDayPoints?: number;
+  attendanceLatePoints?: number;
 }
 
 const settingsSelect = {
@@ -39,6 +42,9 @@ const settingsSelect = {
   examResultType: true,
   onlineAdmission: true,
   liveClassAutoAttendance: true,
+  attendancePresentPoints: true,
+  attendanceHalfDayPoints: true,
+  attendanceLatePoints: true,
   updatedAt: true,
 } satisfies Prisma.TenantSettingSelect;
 

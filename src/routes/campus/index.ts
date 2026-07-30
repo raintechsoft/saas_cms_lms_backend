@@ -137,6 +137,8 @@ import {
   awardAttendancePointsController,
   createLeaveController,
   getAttendancePointsController,
+  getAttendancePointScoresController,
+  updateAttendancePointConfigController,
   getAttendanceReportController,
   getAttendanceSetupController,
   listLeavesController,
@@ -856,6 +858,16 @@ campusRouter.get(
   "/attendance/points",
   requirePermission("attendance.view"),
   asyncHandler(getAttendancePointsController),
+);
+campusRouter.get(
+  "/attendance/points/scores",
+  requirePermission("attendance.view"),
+  asyncHandler(getAttendancePointScoresController),
+);
+campusRouter.put(
+  "/attendance/points/config",
+  requirePermission("attendance.manage"),
+  asyncHandler(updateAttendancePointConfigController),
 );
 
 campusRouter.get(

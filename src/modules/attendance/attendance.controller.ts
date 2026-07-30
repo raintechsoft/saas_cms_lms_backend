@@ -8,11 +8,13 @@ import {
   awardAttendancePoints,
   createLeave,
   getAttendancePoints,
+  getAttendancePointScores,
   getAttendanceReport,
   getAttendanceSetup,
   listLeaves,
   markAttendance,
   reviewLeave,
+  updateAttendancePointConfig,
 } from "./attendance.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
@@ -46,6 +48,7 @@ const leaveBody = z.object({
   fromDate: z.coerce.date(),
   toDate: z.coerce.date(),
   reason: z.string().trim().min(3).max(1000),
+  status: z.nativeEnum(LeaveStatus).optional(),
 });
 const leaveQuery = z.object({ status: z.nativeEnum(LeaveStatus).optional() });
 const reviewBody = z.object({
@@ -84,7 +87,11 @@ export async function getAttendanceReportController(req: Request, res: Response)
 
 export async function createLeaveController(req: Request, res: Response) {
   res.status(201).json({
-    data: await createLeave(req.auth!.tenantId!, leaveBody.parse(req.body)),
+    data: await createLeave(
+      req.auth!.tenantId!,
+      req.auth!.userId,
+      leaveBody.parse(req.body),
+    ),
   });
 }
 
@@ -119,5 +126,27 @@ export async function getAttendancePointsController(req: Request, res: Response)
   const { sessionId } = pointQuery.parse(req.query);
   res.json({
     data: await getAttendancePoints(req.auth!.tenantId!, sessionId),
+  });
+}
+
+export async function getAttendancePointScoresController(req: Request, res: Response) {
+  const query = z.object({ sessionId: z.string().min(1).optional() }).parse(req.query);
+  res.json({
+    data: await getAttendancePointScores(req.auth!.tenantId!, query.sessionId),
+  });
+}
+
+const pointConfigBody = z.object({
+  presentPoints: z.coerce.number().int().min(-100).max(100),
+  halfDayPoints: z.coerce.number().int().min(-100).max(100),
+  latePoints: z.coerce.number().int().min(-100).max(100),
+});
+
+export async function updateAttendancePointConfigController(req: Request, res: Response) {
+  res.json({
+    data: await updateAttendancePointConfig(
+      req.auth!.tenantId!,
+      pointConfigBody.parse(req.body),
+    ),
   });
 }

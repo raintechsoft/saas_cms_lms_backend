@@ -258,7 +258,14 @@ export async function getAttendanceReport(
 
 export async function createLeave(
   tenantId: string,
-  input: { studentEnrollmentId: string; fromDate: Date; toDate: Date; reason: string },
+  userId: string,
+  input: {
+    studentEnrollmentId: string;
+    fromDate: Date;
+    toDate: Date;
+    reason: string;
+    status?: LeaveStatus;
+  },
 ) {
   if (input.toDate < input.fromDate) {
     throw new AppError(400, "Leave end date must be on or after start date", "INVALID_DATES");
@@ -269,13 +276,30 @@ export async function createLeave(
   if (!enrollment) {
     throw new AppError(400, "Student enrolment is invalid", "INVALID_ENROLLMENT");
   }
+  const status = input.status ?? LeaveStatus.PENDING;
+  const reviewed =
+    status === LeaveStatus.PENDING
+      ? {}
+      : { reviewedById: userId, reviewedAt: new Date() };
   return prisma.studentLeave.create({
     data: {
       tenantId,
       academicSessionId: enrollment.academicSessionId,
-      ...input,
+      studentEnrollmentId: input.studentEnrollmentId,
+      fromDate: input.fromDate,
+      toDate: input.toDate,
+      reason: input.reason,
+      status,
+      ...reviewed,
     },
-    include: { studentEnrollment: { include: { student: true } } },
+    include: {
+      studentEnrollment: {
+        include: {
+          student: true,
+          classSection: { include: { academicClass: true, section: true } },
+        },
+      },
+    },
   });
 }
 
@@ -364,4 +388,139 @@ export async function getAttendancePoints(
     enrollment: byId.get(item.studentEnrollmentId),
     points: item._sum.points ?? 0,
   }));
+}
+
+export async function getAttendancePointScores(tenantId: string, sessionId?: string) {
+  await prisma.tenantSetting.upsert({
+    where: { tenantId },
+    create: { tenantId },
+    update: {},
+  });
+
+  const [settingRows, session] = await Promise.all([
+    prisma.$queryRaw<
+      Array<{
+        attendance_present_points: number;
+        attendance_half_day_points: number;
+        attendance_late_points: number;
+      }>
+    >`SELECT attendance_present_points, attendance_half_day_points, attendance_late_points
+      FROM tenant_settings WHERE tenant_id = ${tenantId} LIMIT 1`,
+    sessionId
+      ? prisma.academicSession.findFirst({ where: tenantScope(tenantId, { id: sessionId }) })
+      : prisma.academicSession.findFirst({ where: tenantScope(tenantId, { isCurrent: true }) }),
+  ]);
+  if (!session) {
+    throw new AppError(400, "Academic session is required", "SESSION_REQUIRED");
+  }
+
+  const presentPts = Number(settingRows[0]?.attendance_present_points ?? 2);
+  const halfPts = Number(settingRows[0]?.attendance_half_day_points ?? 1);
+  const latePts = Number(settingRows[0]?.attendance_late_points ?? -1);
+
+  const [enrollments, records] = await Promise.all([
+    prisma.studentEnrollment.findMany({
+      where: tenantScope(tenantId, {
+        academicSessionId: session.id,
+        status: EnrollmentStatus.ACTIVE,
+      }),
+      include: {
+        student: true,
+        classSection: { include: { academicClass: true, section: true } },
+      },
+      orderBy: [
+        { classSection: { academicClass: { sortOrder: "asc" } } },
+        { classSection: { section: { name: "asc" } } },
+        { rollNumber: "asc" },
+      ],
+    }),
+    prisma.attendanceRecord.findMany({
+      where: tenantScope(tenantId, { academicSessionId: session.id }),
+      select: { studentEnrollmentId: true, status: true },
+    }),
+  ]);
+
+  const counts = new Map<
+    string,
+    { present: number; late: number; absent: number; halfDay: number; holiday: number }
+  >();
+  for (const record of records) {
+    const current = counts.get(record.studentEnrollmentId) ?? {
+      present: 0,
+      late: 0,
+      absent: 0,
+      halfDay: 0,
+      holiday: 0,
+    };
+    if (record.status === AttendanceStatus.PRESENT) current.present += 1;
+    if (record.status === AttendanceStatus.LATE) current.late += 1;
+    if (record.status === AttendanceStatus.ABSENT) current.absent += 1;
+    if (record.status === AttendanceStatus.HALF_DAY) current.halfDay += 1;
+    if (record.status === AttendanceStatus.HOLIDAY) current.holiday += 1;
+    counts.set(record.studentEnrollmentId, current);
+  }
+
+  const scores = enrollments.map((enrollment) => {
+    const tally = counts.get(enrollment.id) ?? {
+      present: 0,
+      late: 0,
+      absent: 0,
+      halfDay: 0,
+      holiday: 0,
+    };
+    const openDays = tally.present + tally.late + tally.absent + tally.halfDay;
+    const pointsEarned =
+      tally.present * presentPts + tally.halfDay * halfPts + tally.late * latePts;
+    const maxPossible = Math.max(0, openDays * Math.max(presentPts, 0));
+    const scorePct = maxPossible > 0 ? Number(((pointsEarned / maxPossible) * 100).toFixed(2)) : 0;
+    return {
+      enrollmentId: enrollment.id,
+      student: enrollment.student,
+      rollNumber: enrollment.rollNumber,
+      classSection: enrollment.classSection,
+      present: tally.present,
+      late: tally.late,
+      absent: tally.absent,
+      halfDay: tally.halfDay,
+      pointsEarned,
+      maxPossible,
+      scorePct,
+    };
+  });
+
+  scores.sort((a, b) => b.scorePct - a.scorePct || b.pointsEarned - a.pointsEarned);
+
+  return {
+    session,
+    config: {
+      presentPoints: presentPts,
+      halfDayPoints: halfPts,
+      latePoints: latePts,
+    },
+    scores,
+  };
+}
+
+export async function updateAttendancePointConfig(
+  tenantId: string,
+  input: { presentPoints: number; halfDayPoints: number; latePoints: number },
+) {
+  await prisma.tenantSetting.upsert({
+    where: { tenantId },
+    create: { tenantId },
+    update: {},
+  });
+  await prisma.$executeRaw`
+    UPDATE tenant_settings
+    SET attendance_present_points = ${input.presentPoints},
+        attendance_half_day_points = ${input.halfDayPoints},
+        attendance_late_points = ${input.latePoints},
+        updated_at = NOW()
+    WHERE tenant_id = ${tenantId}
+  `;
+  return {
+    presentPoints: input.presentPoints,
+    halfDayPoints: input.halfDayPoints,
+    latePoints: input.latePoints,
+  };
 }

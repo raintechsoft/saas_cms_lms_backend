@@ -19,6 +19,9 @@ const updateSettingsSchema = z.object({
   examResultType: z.nativeEnum(ExamResultType).optional(),
   onlineAdmission: z.boolean().optional(),
   liveClassAutoAttendance: z.boolean().optional(),
+  attendancePresentPoints: z.coerce.number().int().min(-100).max(100).optional(),
+  attendanceHalfDayPoints: z.coerce.number().int().min(-100).max(100).optional(),
+  attendanceLatePoints: z.coerce.number().int().min(-100).max(100).optional(),
 }).strict();
 
 export async function getSettingsController(req: Request, res: Response) {

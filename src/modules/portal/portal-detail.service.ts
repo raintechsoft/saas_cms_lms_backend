@@ -73,7 +73,7 @@ export async function createPortalLeave(
   const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
   const enrollment = currentEnrollment(student);
   if (!enrollment) throw new AppError(400, "No active enrolment", "NO_ENROLLMENT");
-  return createLeave(tenantId, {
+  return createLeave(tenantId, viewer.userId, {
     studentEnrollmentId: enrollment.id,
     fromDate: input.fromDate,
     toDate: input.toDate,
