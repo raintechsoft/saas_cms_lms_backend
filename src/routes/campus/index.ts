@@ -274,8 +274,10 @@ campusRouter.use("/hr", requireEntitlement("CMS"), requireModule("hr"));
 campusRouter.use("/documents", requireEntitlement("CMS"), requireModule("documents"));
 campusRouter.use("/reports", requireModule("reports"));
 campusRouter.use("/timetable", requireEntitlement("LMS"), requireModule("timetable"));
-campusRouter.use("/homework", requireEntitlement("LMS"), requireModule("homework"));
-campusRouter.use("/homework-reports", requireEntitlement("LMS"), requireModule("homework"));
+// Homework is reachable from the CMS sidebar (under Examination), so it is
+// gated by module toggle + permissions only, like exams.
+campusRouter.use("/homework", requireModule("homework"));
+campusRouter.use("/homework-reports", requireModule("homework"));
 
 campusRouter.get(
   "/settings",
