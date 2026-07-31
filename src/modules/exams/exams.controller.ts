@@ -11,26 +11,34 @@ import {
   createExamGroup,
   createExamSchedule,
   deleteExam,
+  deleteExamAspect,
   deleteExamGrade,
   deleteExamGroup,
   deleteExamSchedule,
+  deleteExamSubjectLink,
+  deleteMarkComponent,
   getExamResults,
   getExamGroupResults,
   getExamSetup,
   getScheduleRoster,
+  listExamSubjectLinks,
   publishExam,
+  unpublishExam,
+  reorderMarkComponents,
   saveAspectValues,
   saveExamMarks,
+  saveExamSubjectLink,
   updateExam,
+  updateExamAspect,
   updateExamGrade,
   updateExamGroup,
   updateExamSchedule,
+  updateMarkComponent,
 } from "./exams.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
-const nestedIdParams = z.object({
-  id: z.string().min(1),
-  scheduleId: z.string().min(1).optional(),
+const scheduleIdParams = z.object({
+  scheduleId: z.string().min(1),
 });
 const gradeBody = z.object({
   resultType: z.nativeEnum(ExamResultType),
@@ -39,6 +47,7 @@ const gradeBody = z.object({
   maxPercent: z.coerce.number().min(0).max(100),
   gradePoint: z.coerce.number().min(0).max(20).nullable().optional(),
   passStatus: z.nativeEnum(PassStatus),
+  description: z.string().trim().max(200).nullable().optional(),
 });
 const groupBody = z.object({
   academicSessionId: z.string().min(1),
@@ -63,7 +72,7 @@ const scheduleBody = z.object({
   minimumMarks: z.coerce.number().min(0),
 });
 const componentBody = z.object({
-  name: z.string().trim().min(1).max(50),
+  name: z.string().trim().min(1).max(100),
   maximumMarks: z.coerce.number().positive(),
 });
 const assignBody = z.object({
@@ -84,7 +93,23 @@ const markEntriesBody = z.object({
 });
 const aspectBody = z.object({
   name: z.string().trim().min(1).max(100),
-  maximumValue: z.coerce.number().positive(),
+  maximumValue: z.coerce.number().positive().default(5),
+  fieldType: z.enum(["BEHAVIOR", "SKILL", "COMMENT"]).optional(),
+});
+const aspectUpdateBody = aspectBody.partial();
+const componentUpdateBody = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  maximumMarks: z.coerce.number().positive().optional(),
+  sortOrder: z.coerce.number().int().min(0).optional(),
+});
+const reorderComponentsBody = z.object({
+  orderedIds: z.array(z.string().min(1)).min(1),
+});
+const subjectLinkBody = z.object({
+  id: z.string().min(1).optional(),
+  subjectIds: z.array(z.string().min(1)).min(2),
+  mergeType: z.enum(["MERGE", "AVERAGE"]),
+  bifurcationColumns: z.coerce.number().int().min(1).max(20),
 });
 const aspectValuesBody = z.object({
   entries: z.array(z.object({
@@ -124,11 +149,11 @@ export async function createExamScheduleController(req: Request, res: Response) 
 }
 
 export async function addMarkComponentController(req: Request, res: Response) {
-  const { scheduleId } = nestedIdParams.parse(req.params);
+  const { scheduleId } = scheduleIdParams.parse(req.params);
   res.status(201).json({
     data: await addMarkComponent(
       req.auth!.tenantId!,
-      scheduleId!,
+      scheduleId,
       componentBody.parse(req.body),
     ),
   });
@@ -159,6 +184,56 @@ export async function createExamAspectController(req: Request, res: Response) {
   });
 }
 
+export async function updateExamAspectController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateExamAspect(req.auth!.tenantId!, id, aspectUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteExamAspectController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteExamAspect(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function updateMarkComponentController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateMarkComponent(req.auth!.tenantId!, id, componentUpdateBody.parse(req.body)),
+  });
+}
+
+export async function deleteMarkComponentController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteMarkComponent(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function reorderMarkComponentsController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const { orderedIds } = reorderComponentsBody.parse(req.body);
+  res.json({
+    data: await reorderMarkComponents(req.auth!.tenantId!, id, orderedIds),
+  });
+}
+
+export async function listExamSubjectLinksController(req: Request, res: Response) {
+  res.json({ data: await listExamSubjectLinks(req.auth!.tenantId!) });
+}
+
+export async function saveExamSubjectLinkController(req: Request, res: Response) {
+  res.json({
+    data: await saveExamSubjectLink(req.auth!.tenantId!, subjectLinkBody.parse(req.body)),
+  });
+}
+
+export async function deleteExamSubjectLinkController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteExamSubjectLink(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
 export async function saveAspectValuesController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   const { entries } = aspectValuesBody.parse(req.body);
@@ -168,6 +243,11 @@ export async function saveAspectValuesController(req: Request, res: Response) {
 export async function publishExamController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   res.json({ data: await publishExam(req.auth!.tenantId!, id) });
+}
+
+export async function unpublishExamController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await unpublishExam(req.auth!.tenantId!, id) });
 }
 
 export async function getExamResultsController(req: Request, res: Response) {

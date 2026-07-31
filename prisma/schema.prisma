@@ -317,6 +317,7 @@ model Tenant {
   examAspectValues       ExamAspectValue[]
   markComponents         ExamMarkComponent[]
   markComponentScores    ExamMarkComponentScore[]
+  examSubjectLinks       ExamSubjectLink[]
   departments            Department[]
   designations           Designation[]
   staffLeaveTypes        StaffLeaveType[]
@@ -1201,17 +1202,18 @@ model AttendancePoint {
 }
 
 model ExamGrade {
-  id         String         @id @default(cuid())
-  tenantId   String         @map("tenant_id")
-  resultType ExamResultType @map("result_type")
-  name       String
-  minPercent Decimal        @map("min_percent") @db.Decimal(5, 2)
-  maxPercent Decimal        @map("max_percent") @db.Decimal(5, 2)
-  gradePoint Decimal?       @map("grade_point") @db.Decimal(5, 2)
-  passStatus PassStatus     @map("pass_status")
-  createdAt  DateTime       @default(now()) @map("created_at")
-  updatedAt  DateTime       @updatedAt @map("updated_at")
-  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id          String         @id @default(cuid())
+  tenantId    String         @map("tenant_id")
+  resultType  ExamResultType @map("result_type")
+  name        String
+  minPercent  Decimal        @map("min_percent") @db.Decimal(5, 2)
+  maxPercent  Decimal        @map("max_percent") @db.Decimal(5, 2)
+  gradePoint  Decimal?       @map("grade_point") @db.Decimal(5, 2)
+  passStatus  PassStatus     @map("pass_status")
+  description String?        @db.Text
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, resultType, name])
   @@index([tenantId, resultType, minPercent, maxPercent])
@@ -1329,6 +1331,7 @@ model ExamMarkComponent {
   scheduleId   String                   @map("schedule_id")
   name         String
   maximumMarks Decimal                  @map("maximum_marks") @db.Decimal(8, 2)
+  sortOrder    Int                      @default(0) @map("sort_order")
   tenant       Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   schedule     ExamSchedule             @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
   scores       ExamMarkComponentScore[]
@@ -1356,6 +1359,7 @@ model ExamAspectField {
   tenantId     String            @map("tenant_id")
   examId       String            @map("exam_id")
   name         String
+  fieldType    String            @default("BEHAVIOR") @map("field_type")
   maximumValue Decimal           @map("maximum_value") @db.Decimal(8, 2)
   tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   exam         Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
@@ -1378,6 +1382,20 @@ model ExamAspectValue {
 
   @@unique([tenantId, aspectFieldId, examStudentId])
   @@map("exam_aspect_values")
+}
+
+model ExamSubjectLink {
+  id                  String   @id @default(cuid())
+  tenantId            String   @map("tenant_id")
+  subjectIds          Json     @map("subject_ids")
+  mergeType           String   @default("MERGE") @map("merge_type")
+  bifurcationColumns  Int      @default(2) @map("bifurcation_columns")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("exam_subject_links")
 }
 
 model Department {

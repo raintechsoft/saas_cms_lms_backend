@@ -15,7 +15,19 @@ const typeQuery = z.object({ type: z.nativeEnum(DocumentTemplateType).optional()
 const templateBody = z.object({
   type: z.nativeEnum(DocumentTemplateType),
   name: z.string().trim().min(1).max(100),
-  backgroundUrl: z.string().url().max(2000).nullable().optional(),
+  backgroundUrl: z
+    .string()
+    .max(3_000_000)
+    .nullable()
+    .optional()
+    .refine(
+      (value) =>
+        value == null ||
+        value === "" ||
+        /^https?:\/\//i.test(value) ||
+        value.startsWith("data:image/"),
+      { message: "Background must be an image URL or uploaded image" },
+    ),
   width: z.coerce.number().int().min(100).max(5000),
   height: z.coerce.number().int().min(100).max(5000),
   config: z.record(z.string(), z.unknown()),

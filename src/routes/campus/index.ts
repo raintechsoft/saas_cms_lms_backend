@@ -154,21 +154,30 @@ import {
   createExamGradeController,
   createExamGroupController,
   createExamScheduleController,
+  deleteExamAspectController,
   deleteExamController,
   deleteExamGradeController,
   deleteExamGroupController,
   deleteExamScheduleController,
+  deleteExamSubjectLinkController,
+  deleteMarkComponentController,
   getExamResultsController,
   getExamGroupResultsController,
   getExamSetupController,
   getScheduleRosterController,
+  listExamSubjectLinksController,
   publishExamController,
+  unpublishExamController,
+  reorderMarkComponentsController,
   saveAspectValuesController,
   saveExamMarksController,
+  saveExamSubjectLinkController,
+  updateExamAspectController,
   updateExamController,
   updateExamGradeController,
   updateExamGroupController,
   updateExamScheduleController,
+  updateMarkComponentController,
 } from "../../modules/exams/exams.controller.js";
 import {
   addStaffAdjustmentController,
@@ -951,9 +960,59 @@ campusRouter.post(
   asyncHandler(createExamAspectController),
 );
 campusRouter.put(
+  "/exams/aspects/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(updateExamAspectController),
+);
+campusRouter.delete(
+  "/exams/aspects/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteExamAspectController),
+);
+campusRouter.put(
+  "/exams/components/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(updateMarkComponentController),
+);
+campusRouter.delete(
+  "/exams/components/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteMarkComponentController),
+);
+campusRouter.put(
+  "/exams/schedules/:id/components/reorder",
+  requirePermission("exams.manage"),
+  asyncHandler(reorderMarkComponentsController),
+);
+campusRouter.get(
+  "/exams/subject-links",
+  requirePermission("exams.view"),
+  asyncHandler(listExamSubjectLinksController),
+);
+campusRouter.post(
+  "/exams/subject-links",
+  requirePermission("exams.manage"),
+  asyncHandler(saveExamSubjectLinkController),
+);
+campusRouter.put(
+  "/exams/subject-links",
+  requirePermission("exams.manage"),
+  asyncHandler(saveExamSubjectLinkController),
+);
+campusRouter.delete(
+  "/exams/subject-links/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteExamSubjectLinkController),
+);
+campusRouter.put(
   "/exams/:id/publish",
   requirePermission("exams.publish"),
   asyncHandler(publishExamController),
+);
+campusRouter.put(
+  "/exams/:id/unpublish",
+  requirePermission("exams.publish"),
+  asyncHandler(unpublishExamController),
 );
 campusRouter.get(
   "/exams/groups/:id/results",

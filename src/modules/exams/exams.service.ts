@@ -16,11 +16,11 @@ const examInclude = {
     include: {
       classSection: { include: { academicClass: true, section: true } },
       classSubject: { include: { subject: true } },
-      components: true,
+      components: { orderBy: [{ sortOrder: "asc" }, { name: "asc" }] },
     },
     orderBy: [{ examDate: "asc" }, { startTime: "asc" }],
   },
-  aspects: { orderBy: { name: "asc" } },
+  aspects: { orderBy: [{ name: "asc" }] },
   _count: { select: { students: true } },
 } satisfies Prisma.ExamInclude;
 
@@ -43,7 +43,7 @@ export async function getExamSetup(tenantId: string) {
   const currentSession = await prisma.academicSession.findFirst({
     where: tenantScope(tenantId, { isCurrent: true }),
   });
-  const [sessions, grades, groups, classSections, templates] = await Promise.all([
+  const [sessions, grades, groups, classSections, templates, subjectLinks] = await Promise.all([
     prisma.academicSession.findMany({
       where: tenantScope(tenantId, {}),
       orderBy: { startDate: "desc" },
@@ -80,8 +80,12 @@ export async function getExamSetup(tenantId: string) {
       }),
       orderBy: { name: "asc" },
     }),
+    prisma.examSubjectLink.findMany({
+      where: tenantScope(tenantId, {}),
+      orderBy: { updatedAt: "desc" },
+    }),
   ]);
-  return { currentSession, sessions, grades, groups, classSections, templates };
+  return { currentSession, sessions, grades, groups, classSections, templates, subjectLinks };
 }
 
 export async function createExamGrade(
@@ -93,6 +97,7 @@ export async function createExamGrade(
     maxPercent: number;
     gradePoint?: number | null;
     passStatus: PassStatus;
+    description?: string | null;
   },
 ) {
   if (input.minPercent > input.maxPercent) {
@@ -211,11 +216,99 @@ export async function addMarkComponent(
     (sum, component) => sum + Number(component.maximumMarks),
     input.maximumMarks,
   );
+  const created = await prisma.examMarkComponent.create({
+    data: {
+      tenantId,
+      scheduleId,
+      name: input.name,
+      maximumMarks: input.maximumMarks,
+      sortOrder: schedule.components.length + 1,
+    },
+  });
   if (total > Number(schedule.maximumMarks)) {
-    throw new AppError(400, "Component marks exceed schedule maximum", "COMPONENT_TOTAL_EXCEEDED");
+    await prisma.examSchedule.update({
+      where: { id: scheduleId },
+      data: { maximumMarks: total },
+    });
   }
-  return prisma.examMarkComponent.create({
-    data: { tenantId, scheduleId, ...input },
+  return created;
+}
+
+export async function updateMarkComponent(
+  tenantId: string,
+  componentId: string,
+  input: { name?: string; maximumMarks?: number; sortOrder?: number },
+) {
+  const component = await prisma.examMarkComponent.findFirst({
+    where: tenantScope(tenantId, { id: componentId }),
+    include: { schedule: { include: { exam: true, components: true } } },
+  });
+  if (!component) throw new AppError(404, "Mark field not found", "COMPONENT_NOT_FOUND");
+  if (component.schedule.exam.status === ExamStatus.PUBLISHED) {
+    throw new AppError(409, "Published exam cannot be changed", "EXAM_PUBLISHED");
+  }
+  if (input.maximumMarks !== undefined) {
+    const others = component.schedule.components
+      .filter((item) => item.id !== componentId)
+      .reduce((sum, item) => sum + Number(item.maximumMarks), 0);
+    const nextTotal = others + input.maximumMarks;
+    if (nextTotal > Number(component.schedule.maximumMarks)) {
+      await prisma.examSchedule.update({
+        where: { id: component.scheduleId },
+        data: { maximumMarks: nextTotal },
+      });
+    }
+  }
+  return prisma.examMarkComponent.update({
+    where: { id: componentId },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(input.maximumMarks !== undefined ? { maximumMarks: input.maximumMarks } : {}),
+      ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+    },
+  });
+}
+
+export async function deleteMarkComponent(tenantId: string, componentId: string) {
+  const component = await prisma.examMarkComponent.findFirst({
+    where: tenantScope(tenantId, { id: componentId }),
+    include: { schedule: { include: { exam: true } } },
+  });
+  if (!component) throw new AppError(404, "Mark field not found", "COMPONENT_NOT_FOUND");
+  if (component.schedule.exam.status === ExamStatus.PUBLISHED) {
+    throw new AppError(409, "Published exam cannot be changed", "EXAM_PUBLISHED");
+  }
+  await prisma.examMarkComponent.delete({ where: { id: componentId } });
+}
+
+export async function reorderMarkComponents(
+  tenantId: string,
+  scheduleId: string,
+  orderedIds: string[],
+) {
+  const schedule = await prisma.examSchedule.findFirst({
+    where: tenantScope(tenantId, { id: scheduleId }),
+    include: { exam: true, components: true },
+  });
+  if (!schedule) throw new AppError(404, "Exam schedule not found", "SCHEDULE_NOT_FOUND");
+  if (schedule.exam.status === ExamStatus.PUBLISHED) {
+    throw new AppError(409, "Published exam cannot be changed", "EXAM_PUBLISHED");
+  }
+  const existing = new Set(schedule.components.map((item) => item.id));
+  if (orderedIds.length !== existing.size || orderedIds.some((id) => !existing.has(id))) {
+    throw new AppError(400, "Component order is invalid", "INVALID_COMPONENT_ORDER");
+  }
+  await prisma.$transaction(
+    orderedIds.map((id, index) =>
+      prisma.examMarkComponent.update({
+        where: { id },
+        data: { sortOrder: index + 1 },
+      }),
+    ),
+  );
+  return prisma.examMarkComponent.findMany({
+    where: tenantScope(tenantId, { scheduleId }),
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
 }
 
@@ -374,6 +467,7 @@ export async function getScheduleRoster(tenantId: string, scheduleId: string) {
         where: { scheduleId },
         include: { componentScores: { include: { component: true } } },
       },
+      aspectValues: true,
     },
     orderBy: [{ rollNumber: "asc" }],
   });
@@ -382,13 +476,120 @@ export async function getScheduleRoster(tenantId: string, scheduleId: string) {
 export async function createExamAspect(
   tenantId: string,
   examId: string,
-  input: { name: string; maximumValue: number },
+  input: { name: string; maximumValue: number; fieldType?: string },
 ) {
   const exam = await requireExam(tenantId, examId);
   if (exam.status === ExamStatus.PUBLISHED) {
     throw new AppError(409, "Published exam cannot be changed", "EXAM_PUBLISHED");
   }
-  return prisma.examAspectField.create({ data: { tenantId, examId, ...input } });
+  const fieldType = (input.fieldType ?? "BEHAVIOR").toUpperCase();
+  if (!["BEHAVIOR", "SKILL", "COMMENT"].includes(fieldType)) {
+    throw new AppError(400, "Invalid aspect field type", "INVALID_ASPECT_FIELD_TYPE");
+  }
+  const maximumValue = fieldType === "COMMENT" ? 1 : input.maximumValue;
+  return prisma.examAspectField.create({
+    data: {
+      tenantId,
+      examId,
+      name: input.name,
+      fieldType,
+      maximumValue,
+    },
+  });
+}
+
+export async function updateExamAspect(
+  tenantId: string,
+  aspectId: string,
+  input: { name?: string; maximumValue?: number; fieldType?: string },
+) {
+  const field = await prisma.examAspectField.findFirst({
+    where: tenantScope(tenantId, { id: aspectId }),
+    include: { exam: true },
+  });
+  if (!field) throw new AppError(404, "Aspect field not found", "ASPECT_NOT_FOUND");
+  if (field.exam.status === ExamStatus.PUBLISHED) {
+    throw new AppError(409, "Published exam cannot be changed", "EXAM_PUBLISHED");
+  }
+  const fieldType = input.fieldType ? input.fieldType.toUpperCase() : undefined;
+  if (fieldType && !["BEHAVIOR", "SKILL", "COMMENT"].includes(fieldType)) {
+    throw new AppError(400, "Invalid aspect field type", "INVALID_ASPECT_FIELD_TYPE");
+  }
+  return prisma.examAspectField.update({
+    where: { id: aspectId },
+    data: {
+      ...(input.name !== undefined ? { name: input.name } : {}),
+      ...(fieldType ? { fieldType } : {}),
+      ...(input.maximumValue !== undefined
+        ? { maximumValue: fieldType === "COMMENT" || field.fieldType === "COMMENT" ? 1 : input.maximumValue }
+        : fieldType === "COMMENT"
+          ? { maximumValue: 1 }
+          : {}),
+    },
+  });
+}
+
+export async function deleteExamAspect(tenantId: string, aspectId: string) {
+  const field = await prisma.examAspectField.findFirst({
+    where: tenantScope(tenantId, { id: aspectId }),
+    include: { exam: true },
+  });
+  if (!field) throw new AppError(404, "Aspect field not found", "ASPECT_NOT_FOUND");
+  if (field.exam.status === ExamStatus.PUBLISHED) {
+    throw new AppError(409, "Published exam cannot be changed", "EXAM_PUBLISHED");
+  }
+  await prisma.examAspectField.delete({ where: { id: aspectId } });
+}
+
+export async function listExamSubjectLinks(tenantId: string) {
+  return prisma.examSubjectLink.findMany({
+    where: tenantScope(tenantId, {}),
+    orderBy: { updatedAt: "desc" },
+  });
+}
+
+export async function saveExamSubjectLink(
+  tenantId: string,
+  input: {
+    id?: string;
+    subjectIds: string[];
+    mergeType: "MERGE" | "AVERAGE";
+    bifurcationColumns: number;
+  },
+) {
+  if (input.subjectIds.length < 2) {
+    throw new AppError(400, "Select at least two subjects to link", "SUBJECT_LINK_TOO_FEW");
+  }
+  if (input.id) {
+    const existing = await prisma.examSubjectLink.findFirst({
+      where: tenantScope(tenantId, { id: input.id }),
+    });
+    if (!existing) throw new AppError(404, "Subject link not found", "SUBJECT_LINK_NOT_FOUND");
+    return prisma.examSubjectLink.update({
+      where: { id: input.id },
+      data: {
+        subjectIds: input.subjectIds,
+        mergeType: input.mergeType,
+        bifurcationColumns: input.bifurcationColumns,
+      },
+    });
+  }
+  return prisma.examSubjectLink.create({
+    data: {
+      tenantId,
+      subjectIds: input.subjectIds,
+      mergeType: input.mergeType,
+      bifurcationColumns: input.bifurcationColumns,
+    },
+  });
+}
+
+export async function deleteExamSubjectLink(tenantId: string, id: string) {
+  const existing = await prisma.examSubjectLink.findFirst({
+    where: tenantScope(tenantId, { id }),
+  });
+  if (!existing) throw new AppError(404, "Subject link not found", "SUBJECT_LINK_NOT_FOUND");
+  await prisma.examSubjectLink.delete({ where: { id } });
 }
 
 export async function saveAspectValues(
@@ -469,6 +670,18 @@ export async function publishExam(tenantId: string, examId: string) {
   });
 }
 
+export async function unpublishExam(tenantId: string, examId: string) {
+  const exam = await requireExam(tenantId, examId);
+  if (exam.status === ExamStatus.DRAFT) return exam;
+  if ((exam.status as string) === "ARCHIVED") {
+    throw new AppError(400, "Archived exams cannot be unpublished", "EXAM_ARCHIVED");
+  }
+  return prisma.exam.update({
+    where: { id: examId },
+    data: { status: ExamStatus.DRAFT, publishedAt: null },
+  });
+}
+
 export async function getExamResults(tenantId: string, examId: string) {
   const exam = await requireExam(tenantId, examId);
   const [students, grades] = await Promise.all([
@@ -481,7 +694,16 @@ export async function getExamResults(tenantId: string, examId: string) {
             classSection: { include: { academicClass: true, section: true } },
           },
         },
-        marks: { include: { schedule: { include: { classSubject: { include: { subject: true } } } } } },
+        marks: {
+          include: {
+            schedule: {
+              include: {
+                classSubject: { include: { subject: true } },
+                components: true,
+              },
+            },
+          },
+        },
         aspectValues: { include: { aspectField: true } },
       },
     }),
@@ -491,10 +713,19 @@ export async function getExamResults(tenantId: string, examId: string) {
     }),
   ]);
   const results = students.map((student) => {
-    const maximumMarks = student.marks.reduce(
-      (sum, mark) => sum + Number(mark.schedule.maximumMarks),
-      0,
-    );
+    const maximumMarks = student.marks.reduce((sum, mark) => {
+      const components = mark.schedule.components ?? [];
+      if (components.length > 0) {
+        return (
+          sum +
+          components.reduce(
+            (componentSum, component) => componentSum + Number(component.maximumMarks),
+            0,
+          )
+        );
+      }
+      return sum + Number(mark.schedule.maximumMarks);
+    }, 0);
     const obtainedMarks = student.marks.reduce(
       (sum, mark) => sum + Number(mark.marksObtained),
       0,
@@ -636,6 +867,7 @@ export async function updateExamGrade(
     maxPercent?: number;
     gradePoint?: number | null;
     passStatus?: PassStatus;
+    description?: string | null;
   },
 ) {
   const existing = await prisma.examGrade.findFirst({ where: tenantScope(tenantId, { id }) });
@@ -662,6 +894,7 @@ export async function updateExamGrade(
       ...(input.maxPercent !== undefined ? { maxPercent: input.maxPercent } : {}),
       ...(input.gradePoint !== undefined ? { gradePoint: input.gradePoint } : {}),
       ...(input.passStatus !== undefined ? { passStatus: input.passStatus } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
     },
   });
 }
