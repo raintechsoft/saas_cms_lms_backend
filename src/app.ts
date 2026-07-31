@@ -40,7 +40,9 @@ app.use(
     credentials: false,
   }),
 );
-app.use(express.json({ limit: "2mb" }));
+// Staff photos/documents and leave attachments are sent as base64 data URLs
+// (up to ~7MB each after encoding), so the JSON limit must accommodate them.
+app.use(express.json({ limit: "25mb" }));
 if (getStorageDriver() === "local") {
   app.use("/uploads", express.static(UPLOAD_ROOT));
 }

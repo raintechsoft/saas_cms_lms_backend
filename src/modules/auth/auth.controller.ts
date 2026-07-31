@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
 import { persistAvatarUpload } from "../../lib/uploads.js";
 import {
+  changePassword,
   forgotPassword,
   getAuthPublicConfig,
   getCurrentUser,
@@ -54,6 +55,11 @@ const profileUpdateSchema = z.object({
   phone: z.string().trim().max(30).nullable().optional(),
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(200).optional(),
+  newPassword: z.string().min(8).max(200),
+});
+
 export async function loginController(req: Request, res: Response) {
   const input = loginSchema.parse(req.body);
   const result = await login(input);
@@ -75,6 +81,11 @@ export async function updateProfileController(req: Request, res: Response) {
   const input = profileUpdateSchema.parse(req.body);
   const data = await updateOwnProfile(req.auth!.userId, input);
   res.json({ data });
+}
+
+export async function changePasswordController(req: Request, res: Response) {
+  const input = changePasswordSchema.parse(req.body);
+  res.json({ data: await changePassword(req.auth!.userId, input) });
 }
 
 export async function uploadAvatarController(req: Request, res: Response) {

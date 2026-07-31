@@ -13,14 +13,27 @@ import {
   applyStaffLeave,
   createDepartment,
   createDesignation,
+  createPayParameter,
   createStaffLeaveType,
   createStaffProfile,
+  deleteDepartment,
+  deleteDesignation,
+  deletePayParameter,
+  deleteStaffLeaveType,
   generatePayroll,
   getHrSetup,
   getStaffAttendanceReport,
+  getStaffLeave,
+  getTeacherRatingsSummary,
   markStaffAttendance,
   payPayroll,
+  revertPayroll,
   reviewStaffLeave,
+  updateDepartment,
+  updateDesignation,
+  updatePayParameter,
+  updateStaffLeaveType,
+  updateStaffProfile,
   updateStaffStatus,
 } from "./hr.service.js";
 
@@ -29,22 +42,102 @@ const nameBody = z.object({ name: z.string().trim().min(1).max(100) });
 const leaveTypeBody = nameBody.extend({
   annualLimit: z.coerce.number().int().positive().max(366).nullable().optional(),
 });
+const payParameterBody = z.object({
+  name: z.string().trim().min(1).max(100),
+  type: z.nativeEnum(AdjustmentType),
+  defaultAmount: z.coerce.number().min(0),
+});
+const payParameterUpdateBody = payParameterBody.partial();
 const setupQuery = z.object({ month: z.coerce.date().optional() });
-const staffBody = z.object({
-  userId: z.string().min(1),
+const optionalText = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .nullable()
+    .optional()
+    .transform((value) => (value === "" ? null : value));
+const staffDetailsShape = {
   employeeNumber: z.string().trim().min(1).max(50).optional(),
   departmentId: z.string().min(1).nullable().optional(),
   designationId: z.string().min(1).nullable().optional(),
   joiningDate: z.coerce.date(),
   dateOfBirth: z.coerce.date().nullable().optional(),
-  phone: z.string().trim().max(30).nullable().optional(),
-  address: z.string().trim().max(1000).nullable().optional(),
+  phone: optionalText(30),
+  address: optionalText(1000),
   basicSalary: z.coerce.number().min(0),
-});
+  gender: optionalText(20),
+  maritalStatus: optionalText(30),
+  emergencyContact: optionalText(30),
+  epfNumber: optionalText(50),
+  contractType: optionalText(30),
+  workShift: optionalText(30),
+  workLocation: optionalText(100),
+  leaveAllowance: z.coerce.number().int().min(0).max(366).nullable().optional(),
+  bankAccountTitle: optionalText(100),
+  bankAccountNumber: optionalText(50),
+  bankName: optionalText(100),
+  bankIfsc: optionalText(20),
+  bankBranch: optionalText(100),
+  permanentAddress: optionalText(1000),
+  photoUrl: z
+    .string()
+    .max(3_000_000)
+    .nullable()
+    .optional()
+    .refine(
+      (value) =>
+        value == null ||
+        value === "" ||
+        /^https?:\/\//i.test(value) ||
+        value.startsWith("data:image/"),
+      { message: "Photo must be an image URL or uploaded image" },
+    )
+    .transform((value) => (value === "" ? null : value)),
+  documents: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(50),
+        name: z.string().trim().min(1).max(200),
+        dataUrl: z.string().min(1).max(7_000_000).startsWith("data:"),
+      }),
+    )
+    .max(10)
+    .nullable()
+    .optional(),
+};
+const staffBody = z
+  .object({
+    userId: z.string().min(1).optional(),
+    newUser: z
+      .object({
+        firstName: z.string().trim().min(1).max(100),
+        lastName: z.string().trim().min(1).max(100),
+        email: z.string().trim().email().max(200),
+        roleCode: z.enum(["INSTITUTION_ADMIN", "TEACHER", "ACCOUNTANT", "STAFF"]),
+      })
+      .optional(),
+    adjustments: z
+      .array(
+        z.object({
+          name: z.string().trim().min(1).max(100),
+          type: z.nativeEnum(AdjustmentType),
+          amount: z.coerce.number().positive(),
+          isRecurring: z.boolean().optional(),
+        }),
+      )
+      .max(20)
+      .optional(),
+    ...staffDetailsShape,
+  })
+  .refine((value) => value.userId || value.newUser, {
+    message: "Provide an existing user or new staff details",
+  });
 const statusBody = z.object({
   status: z.nativeEnum(StaffStatus),
   disabledReason: z.string().trim().max(1000).nullable().optional(),
 });
+const staffUpdateBody = z.object(staffDetailsShape).partial();
 const attendanceBody = z.object({
   attendanceDate: z.coerce.date(),
   records: z.array(z.object({
@@ -66,6 +159,13 @@ const leaveBody = z.object({
   fromDate: z.coerce.date(),
   toDate: z.coerce.date(),
   reason: z.string().trim().min(3).max(2000),
+  attachment: z
+    .object({
+      name: z.string().trim().min(1).max(200),
+      dataUrl: z.string().min(1).max(7_000_000).startsWith("data:"),
+    })
+    .nullable()
+    .optional(),
 });
 const reviewBody = z.object({
   status: z.nativeEnum(StaffLeaveStatus),
@@ -108,15 +208,86 @@ export async function createDesignationController(req: Request, res: Response) {
   res.status(201).json({ data: await createDesignation(req.auth!.tenantId!, name) });
 }
 
+export async function updateDepartmentController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const { name } = nameBody.parse(req.body);
+  res.json({ data: await updateDepartment(req.auth!.tenantId!, id, name) });
+}
+
+export async function deleteDepartmentController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteDepartment(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function updateDesignationController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const { name } = nameBody.parse(req.body);
+  res.json({ data: await updateDesignation(req.auth!.tenantId!, id, name) });
+}
+
+export async function deleteDesignationController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteDesignation(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
 export async function createStaffLeaveTypeController(req: Request, res: Response) {
   res.status(201).json({
     data: await createStaffLeaveType(req.auth!.tenantId!, leaveTypeBody.parse(req.body)),
   });
 }
 
+export async function updateStaffLeaveTypeController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateStaffLeaveType(
+      req.auth!.tenantId!,
+      id,
+      leaveTypeBody.partial().parse(req.body),
+    ),
+  });
+}
+
+export async function deleteStaffLeaveTypeController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteStaffLeaveType(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function createPayParameterController(req: Request, res: Response) {
+  res.status(201).json({
+    data: await createPayParameter(req.auth!.tenantId!, payParameterBody.parse(req.body)),
+  });
+}
+
+export async function updatePayParameterController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updatePayParameter(
+      req.auth!.tenantId!,
+      id,
+      payParameterUpdateBody.parse(req.body),
+    ),
+  });
+}
+
+export async function deletePayParameterController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deletePayParameter(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
 export async function createStaffProfileController(req: Request, res: Response) {
   res.status(201).json({
     data: await createStaffProfile(req.auth!.tenantId!, staffBody.parse(req.body)),
+  });
+}
+
+export async function updateStaffProfileController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateStaffProfile(req.auth!.tenantId!, id, staffUpdateBody.parse(req.body)),
   });
 }
 
@@ -150,6 +321,11 @@ export async function applyStaffLeaveController(req: Request, res: Response) {
   res.status(201).json({
     data: await applyStaffLeave(req.auth!.tenantId!, leaveBody.parse(req.body)),
   });
+}
+
+export async function getStaffLeaveController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getStaffLeave(req.auth!.tenantId!, id) });
 }
 
 export async function reviewStaffLeaveController(req: Request, res: Response) {
@@ -186,6 +362,17 @@ export async function payPayrollController(req: Request, res: Response) {
   res.json({
     data: await payPayroll(req.auth!.tenantId!, id, payBody.parse(req.body)),
   });
+}
+
+export async function revertPayrollController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await revertPayroll(req.auth!.tenantId!, id),
+  });
+}
+
+export async function getTeacherRatingsSummaryController(req: Request, res: Response) {
+  res.json({ data: await getTeacherRatingsSummary(req.auth!.tenantId!) });
 }
 
 export async function addTeacherRatingController(req: Request, res: Response) {

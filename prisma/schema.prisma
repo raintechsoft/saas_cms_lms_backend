@@ -321,6 +321,7 @@ model Tenant {
   departments            Department[]
   designations           Designation[]
   staffLeaveTypes        StaffLeaveType[]
+  payParameters          PayParameter[]
   staffProfiles          StaffProfile[]
   staffAttendance        StaffAttendance[]
   staffLeaves            StaffLeave[]
@@ -1437,6 +1438,21 @@ model StaffLeaveType {
   @@map("staff_leave_types")
 }
 
+model PayParameter {
+  id            String         @id @default(cuid())
+  tenantId      String         @map("tenant_id")
+  name          String
+  type          AdjustmentType @default(EARNING)
+  defaultAmount Decimal        @default(0) @map("default_amount") @db.Decimal(12, 2)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("pay_parameters")
+}
+
 model StaffProfile {
   id                 String              @id @default(cuid())
   tenantId           String              @map("tenant_id")
@@ -1451,6 +1467,22 @@ model StaffProfile {
   basicSalary        Decimal             @default(0) @map("basic_salary") @db.Decimal(12, 2)
   status             StaffStatus         @default(ACTIVE)
   disabledReason     String?             @map("disabled_reason")
+  gender             String?
+  maritalStatus      String?             @map("marital_status")
+  emergencyContact   String?             @map("emergency_contact")
+  epfNumber          String?             @map("epf_number")
+  contractType       String?             @map("contract_type")
+  workShift          String?             @map("work_shift")
+  workLocation       String?             @map("work_location")
+  leaveAllowance     Int?                @map("leave_allowance")
+  bankAccountTitle   String?             @map("bank_account_title")
+  bankAccountNumber  String?             @map("bank_account_number")
+  bankName           String?             @map("bank_name")
+  bankIfsc           String?             @map("bank_ifsc")
+  bankBranch         String?             @map("bank_branch")
+  permanentAddress   String?             @map("permanent_address") @db.Text
+  photoUrl           String?             @map("photo_url") @db.Text
+  documents          Json?
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1502,6 +1534,7 @@ model StaffLeave {
   reviewedById String?          @map("reviewed_by_id")
   reviewedAt   DateTime?        @map("reviewed_at")
   reviewNote   String?          @map("review_note") @db.Text
+  attachment   Json?
   createdAt    DateTime         @default(now()) @map("created_at")
   updatedAt    DateTime         @updatedAt @map("updated_at")
   tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)

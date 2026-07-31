@@ -190,9 +190,22 @@ import {
   generatePayrollController,
   getHrSetupController,
   getStaffAttendanceReportController,
+  getStaffLeaveController,
+  getTeacherRatingsSummaryController,
   markStaffAttendanceController,
   payPayrollController,
+  revertPayrollController,
+  createPayParameterController,
+  deleteDepartmentController,
+  deleteDesignationController,
+  deletePayParameterController,
+  deleteStaffLeaveTypeController,
   reviewStaffLeaveController,
+  updateDepartmentController,
+  updateDesignationController,
+  updatePayParameterController,
+  updateStaffLeaveTypeController,
+  updateStaffProfileController,
   updateStaffStatusController,
 } from "../../modules/hr/hr.controller.js";
 import {
@@ -1069,11 +1082,71 @@ campusRouter.post(
   requirePermission("hr.manage"),
   asyncHandler(createStaffLeaveTypeController),
 );
+campusRouter.put(
+  "/hr/departments/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(updateDepartmentController),
+);
+campusRouter.delete(
+  "/hr/departments/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(deleteDepartmentController),
+);
+campusRouter.put(
+  "/hr/designations/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(updateDesignationController),
+);
+campusRouter.delete(
+  "/hr/designations/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(deleteDesignationController),
+);
+campusRouter.put(
+  "/hr/leave-types/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(updateStaffLeaveTypeController),
+);
+campusRouter.delete(
+  "/hr/leave-types/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(deleteStaffLeaveTypeController),
+);
+campusRouter.post(
+  "/hr/pay-parameters",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(createPayParameterController),
+);
+campusRouter.put(
+  "/hr/pay-parameters/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(updatePayParameterController),
+);
+campusRouter.delete(
+  "/hr/pay-parameters/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(deletePayParameterController),
+);
 campusRouter.post(
   "/hr/staff",
   requireEntitlement("CMS"),
   requirePermission("hr.manage"),
   asyncHandler(createStaffProfileController),
+);
+campusRouter.put(
+  "/hr/staff/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(updateStaffProfileController),
 );
 campusRouter.put(
   "/hr/staff/:id/status",
@@ -1099,6 +1172,12 @@ campusRouter.post(
   requirePermission("hr.manage"),
   asyncHandler(applyStaffLeaveController),
 );
+campusRouter.get(
+  "/hr/leaves/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(getStaffLeaveController),
+);
 campusRouter.put(
   "/hr/leaves/:id/review",
   requireEntitlement("CMS"),
@@ -1123,11 +1202,23 @@ campusRouter.put(
   requirePermission("payroll.manage"),
   asyncHandler(payPayrollController),
 );
+campusRouter.put(
+  "/hr/payroll/:id/revert",
+  requireEntitlement("CMS"),
+  requirePermission("payroll.manage"),
+  asyncHandler(revertPayrollController),
+);
 campusRouter.post(
   "/hr/ratings",
   requireEntitlement("CMS"),
   requirePermission("hr.manage"),
   asyncHandler(addTeacherRatingController),
+);
+campusRouter.get(
+  "/hr/ratings/summary",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(getTeacherRatingsSummaryController),
 );
 
 campusRouter.get(

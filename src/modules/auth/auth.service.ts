@@ -431,6 +431,34 @@ export async function resetPassword(input: {
   return { message: "Password updated. You can sign in with your new password." };
 }
 
+export async function changePassword(
+  userId: string,
+  input: { currentPassword?: string; newPassword: string },
+) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
+  if (user.passwordHash) {
+    if (
+      !input.currentPassword ||
+      !(await bcrypt.compare(input.currentPassword, user.passwordHash))
+    ) {
+      throw new AppError(400, "Current password is incorrect", "INVALID_CURRENT_PASSWORD");
+    }
+    if (input.currentPassword === input.newPassword) {
+      throw new AppError(
+        400,
+        "New password must be different from the current password",
+        "SAME_PASSWORD",
+      );
+    }
+  }
+  await prisma.user.update({
+    where: { id: userId },
+    data: { passwordHash: await bcrypt.hash(input.newPassword, 12) },
+  });
+  return { message: "Password updated successfully" };
+}
+
 export async function loginWithGoogle(input: { idToken: string; tenantSlug?: string }) {
   if (!isGoogleAuthConfigured()) {
     throw new AppError(503, "Google sign-in is not configured", "GOOGLE_NOT_CONFIGURED");

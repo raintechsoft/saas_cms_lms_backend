@@ -1,0 +1,16 @@
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "gender" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "marital_status" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "emergency_contact" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "epf_number" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "contract_type" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "work_shift" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "work_location" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "leave_allowance" INTEGER;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "bank_account_title" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "bank_account_number" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "bank_name" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "bank_ifsc" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "bank_branch" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "permanent_address" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "photo_url" TEXT;
+ALTER TABLE "staff_profiles" ADD COLUMN IF NOT EXISTS "documents" JSONB;
