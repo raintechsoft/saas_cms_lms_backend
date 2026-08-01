@@ -24,7 +24,7 @@ integration("CMS completion tenant API", () => {
       body: JSON.stringify({
         tenantSlug: "demo-school",
         email: "admin@demo-school.local",
-        password: "ChangeMe123!",
+        password: "11111111",
       }),
     });
     const body = await response.json() as { data: { accessToken: string } };

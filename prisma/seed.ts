@@ -56,7 +56,7 @@ async function main() {
   const superAdminEmail = (process.env.SUPER_ADMIN_EMAIL ?? "admin@saas-cms-lms.local").toLowerCase();
   const demoAdminEmail = (process.env.DEMO_ADMIN_EMAIL ?? "admin@demo-school.local").toLowerCase();
   const superAdminPassword = process.env.SUPER_ADMIN_PASSWORD ?? "ChangeMe123!";
-  const demoAdminPassword = process.env.DEMO_ADMIN_PASSWORD ?? "ChangeMe123!";
+  const demoAdminPassword = process.env.DEMO_ADMIN_PASSWORD ?? "11111111";
 
   const permissionRecords = await Promise.all(
     permissions.map(([key, description]) =>
@@ -369,7 +369,12 @@ async function main() {
     where: {
       tenantId_email: { tenantId: demoTenant.id, email: teacherEmail },
     },
-    update: { firstName: "Anita", lastName: "Sharma" },
+    update: {
+      firstName: "Anita",
+      lastName: "Sharma",
+      passwordHash: await bcrypt.hash("ChangeMe123!", passwordRounds),
+      status: "ACTIVE",
+    },
     create: {
       tenantId: demoTenant.id,
       email: teacherEmail,

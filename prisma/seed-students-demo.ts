@@ -633,7 +633,7 @@ async function main() {
   console.log("Login (Institution Admin):");
   console.log(`  slug:     ${tenant.slug}`);
   console.log(`  email:    ${(process.env.DEMO_ADMIN_EMAIL ?? "admin@demo-school.local").toLowerCase()}`);
-  console.log(`  password: ${process.env.DEMO_ADMIN_PASSWORD ?? "ChangeMe123!"}`);
+  console.log(`  password: ${process.env.DEMO_ADMIN_PASSWORD ?? "11111111"}`);
   console.log("  URL:      http://localhost:5173/login");
 }
 

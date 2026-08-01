@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   const email = (process.env.DEMO_ADMIN_EMAIL ?? "admin@demo-school.local").toLowerCase();
-  const password = process.env.DEMO_ADMIN_PASSWORD ?? "ChangeMe123!";
+  const password = process.env.DEMO_ADMIN_PASSWORD ?? "11111111";
   const tenant = await prisma.tenant.findUnique({ where: { slug: "demo-school" } });
   if (!tenant) throw new Error("demo-school tenant missing");
 
@@ -26,7 +26,7 @@ async function main() {
 
   console.log("Reset password for", email, "on slug demo-school");
   console.log("password_length", password.length);
-  console.log("password_ok_default", password === "ChangeMe123!");
+  console.log("password_ok_default", password === "11111111");
 }
 
 main()

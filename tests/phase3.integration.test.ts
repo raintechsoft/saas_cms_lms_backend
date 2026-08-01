@@ -11,13 +11,15 @@ integration("Phase 3 tenant API", () => {
   let teacherToken: string;
 
   async function login(email: string) {
+    const password =
+      email === "admin@demo-school.local" ? "11111111" : "ChangeMe123!";
     const response = await fetch(`${baseUrl}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tenantSlug: "demo-school",
         email,
-        password: "ChangeMe123!",
+        password,
       }),
     });
     const body = await response.json() as { data: { accessToken: string } };

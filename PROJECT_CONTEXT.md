@@ -63,16 +63,16 @@ npm run dev
 
 ## Demo logins (after seed)
 
-Password for all: `ChangeMe123!`
+Default password: `ChangeMe123!` (School Admin: `11111111`)
 
-| Role | URL | Workspace | Email |
-|------|-----|-----------|--------|
-| Super Admin | `/admin/login` | (none) | `admin@saas-cms-lms.local` |
-| School Admin | `/login` | `demo-school` | `admin@demo-school.local` |
-| Teacher | `/login` | `demo-school` | `teacher@demo-school.local` |
-| Accountant | `/login` | `demo-school` | `accountant@demo-school.local` |
-| Student | `/login` | `demo-school` | `student@demo-school.local` |
-| Parent | `/login` | `demo-school` | `parent@demo-school.local` |
+| Role | URL | Workspace | Email | Password |
+|------|-----|-----------|--------|----------|
+| Super Admin | `/admin/login` | (none) | `admin@saas-cms-lms.local` | `ChangeMe123!` |
+| School Admin | `/login` | `demo-school` | `admin@demo-school.local` | `11111111` |
+| Teacher | `/login` | `demo-school` | `teacher@demo-school.local` | `ChangeMe123!` |
+| Accountant | `/login` | `demo-school` | `accountant@demo-school.local` | `ChangeMe123!` |
+| Student | `/login` | `demo-school` | `student@demo-school.local` | `ChangeMe123!` |
+| Parent | `/login` | `demo-school` | `parent@demo-school.local` | `ChangeMe123!` |
 
 ## Architecture notes
 
