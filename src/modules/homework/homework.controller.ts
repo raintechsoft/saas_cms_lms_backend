@@ -7,6 +7,7 @@ import { z } from "zod";
 import {
   createHomework,
   evaluateHomeworkSubmission,
+  getHomework,
   getHomeworkReport,
   getHomeworkSetup,
   getHomeworkSubmissions,
@@ -26,7 +27,18 @@ const homeworkBody = z.object({
   classSubjectId: z.string().min(1),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().min(1).max(10000),
-  attachmentUrl: z.string().url().max(2000).nullable().optional(),
+  // Either a regular link or an uploaded file stored as a data URL.
+  attachmentUrl: z
+    .string()
+    .min(1)
+    .max(30_000_000)
+    .refine(
+      (value) =>
+        value.startsWith("http://") || value.startsWith("https://") || value.startsWith("data:"),
+      "Attachment must be a link or an uploaded file",
+    )
+    .nullable()
+    .optional(),
   homeworkDate: z.coerce.date(),
   submissionDate: z.coerce.date(),
   status: z.nativeEnum(HomeworkStatus).default(HomeworkStatus.PUBLISHED),
@@ -57,6 +69,11 @@ export async function getHomeworkSetupController(req: Request, res: Response) {
       { userId: req.auth!.userId, roles: req.auth!.roles },
     ),
   });
+}
+
+export async function getHomeworkController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getHomework(req.auth!.tenantId!, id) });
 }
 
 export async function createHomeworkController(req: Request, res: Response) {

@@ -110,7 +110,20 @@ export async function getHomeworkSetup(
   const studentClassSectionIds = viewer?.roles.includes("STUDENT")
     ? studentEnrollments.map(({ classSectionId }) => classSectionId)
     : null;
-  const [sessions, classSections, homework] = await Promise.all([
+  const homeworkWhere = tenantScope(tenantId, {
+    ...(sessionId ? { academicSessionId: sessionId } : {}),
+    ...(studentClassSectionIds
+      ? { classSectionId: { in: studentClassSectionIds } }
+      : query.classSectionId
+        ? { classSectionId: query.classSectionId }
+        : {}),
+    ...(studentClassSectionIds
+      ? { status: HomeworkStatus.PUBLISHED }
+      : query.status
+        ? { status: query.status }
+        : {}),
+  });
+  const [sessions, classSections, homework, homeworkWithAttachment] = await Promise.all([
     prisma.academicSession.findMany({
       where: tenantScope(tenantId, {}),
       orderBy: { startDate: "desc" },
@@ -124,23 +137,17 @@ export async function getHomeworkSetup(
         academicClass: true,
         section: true,
         subjects: { include: { subject: true, teacher: true } },
+        _count: {
+          select: { enrollments: { where: { status: EnrollmentStatus.ACTIVE } } },
+        },
       },
       orderBy: [{ academicClass: { sortOrder: "asc" } }, { section: { name: "asc" } }],
     }),
     prisma.homework.findMany({
-      where: tenantScope(tenantId, {
-        ...(sessionId ? { academicSessionId: sessionId } : {}),
-        ...(studentClassSectionIds
-          ? { classSectionId: { in: studentClassSectionIds } }
-          : query.classSectionId
-            ? { classSectionId: query.classSectionId }
-            : {}),
-        ...(studentClassSectionIds
-          ? { status: HomeworkStatus.PUBLISHED }
-          : query.status
-            ? { status: query.status }
-            : {}),
-      }),
+      where: homeworkWhere,
+      // Attachments can be multi-MB data URLs; the list exposes a flag instead
+      // and the full record is fetched via GET /homework/:id when needed.
+      omit: { attachmentUrl: true },
       include: {
         ...homeworkInclude,
         ...(studentClassSectionIds
@@ -158,8 +165,23 @@ export async function getHomeworkSetup(
       },
       orderBy: [{ homeworkDate: "desc" }, { createdAt: "desc" }],
     }),
+    prisma.homework.findMany({
+      where: { ...homeworkWhere, attachmentUrl: { not: null } },
+      select: { id: true },
+    }),
   ]);
-  return { currentSession, sessions, classSections, homework, studentEnrollments };
+  const attachmentIds = new Set(homeworkWithAttachment.map(({ id }) => id));
+  return {
+    currentSession,
+    sessions,
+    classSections,
+    homework: homework.map((item) => ({ ...item, hasAttachment: attachmentIds.has(item.id) })),
+    studentEnrollments,
+  };
+}
+
+export function getHomework(tenantId: string, id: string) {
+  return requireHomework(tenantId, id);
 }
 
 export async function createHomework(
@@ -367,6 +389,7 @@ export async function getHomeworkReport(
       academicSessionId: query.sessionId,
       ...(query.classSectionId ? { classSectionId: query.classSectionId } : {}),
     }),
+    omit: { attachmentUrl: true },
     include: {
       ...homeworkInclude,
       submissions: true,

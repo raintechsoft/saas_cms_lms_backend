@@ -39,6 +39,7 @@ const createTenantBody = z.object({
   distributionModel: z.nativeEnum(DistributionModel).optional(),
   resellerId: z.string().min(1).nullable().optional(),
   branding: brandingSchema.optional(),
+  modules: z.array(z.string().trim().min(1)).max(50).optional(),
   adminEmail: z.string().email().max(200),
   adminPhone: z
     .string()
@@ -58,6 +59,7 @@ const updateTenantBody = z.object({
   distributionModel: z.nativeEnum(DistributionModel).optional(),
   resellerId: z.string().min(1).nullable().optional(),
   branding: brandingSchema.nullable().optional(),
+  modules: z.array(z.string().trim().min(1)).max(50).optional(),
 });
 
 const statusBody = z.object({ status: z.nativeEnum(TenantStatus) });

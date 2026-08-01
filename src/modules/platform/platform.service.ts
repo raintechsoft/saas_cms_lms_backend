@@ -150,7 +150,16 @@ export async function getTenantDetail(id: string) {
     include: { user: { select: { firstName: true, lastName: true, email: true } } },
   });
 
+  const moduleSettings = await prisma.tenantModuleSetting.findMany({ where: { tenantId: id } });
+  const settingByKey = new Map(moduleSettings.map((setting) => [setting.moduleKey, setting]));
+  // A module without a row is treated as enabled everywhere (legacy tenants).
+  const enabledModules = TENANT_MODULE_KEYS.filter((key) => {
+    const setting = settingByKey.get(key);
+    return !setting || setting.adminEnabled || setting.studentEnabled || setting.parentEnabled;
+  });
+
   return {
+    enabledModules,
     id: tenant.id,
     name: tenant.name,
     slug: tenant.slug,
@@ -191,6 +200,67 @@ export async function getTenantDetail(id: string) {
   };
 }
 
+/** Module keys the super admin can toggle per tenant. Must match the campus nav + requireModule keys. */
+export const TENANT_MODULE_KEYS = [
+  "students",
+  "academics",
+  "attendance",
+  "notices",
+  "examinations",
+  "homework",
+  "fees",
+  "hr",
+  "documents",
+  "erp",
+  "timetable",
+  "reports",
+] as const;
+
+type DbClient = Prisma.TransactionClient | typeof prisma;
+
+/**
+ * Persists the super admin's module selection as TenantModuleSetting rows.
+ * Enabling a module that the tenant admin fine-tuned per panel (via ERP settings)
+ * leaves those panel flags untouched; only fully-disabled modules are re-enabled.
+ */
+async function applyTenantModuleSelection(
+  tenantId: string,
+  enabledModules: string[],
+  client: DbClient = prisma,
+) {
+  const enabled = new Set(enabledModules);
+  const existing = await client.tenantModuleSetting.findMany({ where: { tenantId } });
+  const byKey = new Map(existing.map((setting) => [setting.moduleKey, setting]));
+
+  for (const moduleKey of TENANT_MODULE_KEYS) {
+    const isEnabled = enabled.has(moduleKey);
+    const row = byKey.get(moduleKey);
+    if (!row) {
+      await client.tenantModuleSetting.create({
+        data: {
+          tenantId,
+          moduleKey,
+          adminEnabled: isEnabled,
+          studentEnabled: isEnabled,
+          parentEnabled: isEnabled,
+        },
+      });
+    } else if (!isEnabled) {
+      if (row.adminEnabled || row.studentEnabled || row.parentEnabled) {
+        await client.tenantModuleSetting.update({
+          where: { id: row.id },
+          data: { adminEnabled: false, studentEnabled: false, parentEnabled: false },
+        });
+      }
+    } else if (!row.adminEnabled && !row.studentEnabled && !row.parentEnabled) {
+      await client.tenantModuleSetting.update({
+        where: { id: row.id },
+        data: { adminEnabled: true, studentEnabled: true, parentEnabled: true },
+      });
+    }
+  }
+}
+
 interface CreateTenantInput {
   name: string;
   slug?: string;
@@ -199,6 +269,7 @@ interface CreateTenantInput {
   distributionModel?: DistributionModel;
   resellerId?: string | null;
   branding?: JsonObject;
+  modules?: string[];
   adminEmail: string;
   adminPhone: string;
   adminPassword?: string;
@@ -234,6 +305,9 @@ export async function createTenant(input: CreateTenantInput) {
 
     await ensureTenantRoles(tenant.id, tx);
     await bootstrapTenantWorkspace(tenant.id, tx);
+    if (input.modules) {
+      await applyTenantModuleSelection(tenant.id, input.modules, tx);
+    }
 
     let admin: { email: string; phone: string; temporaryPassword?: string } | null = null;
     const email = input.adminEmail.trim().toLowerCase();
@@ -267,6 +341,7 @@ interface UpdateTenantInput {
   type?: TenantType;
   productMode?: ProductMode;
   distributionModel?: DistributionModel;
+  modules?: string[];
   resellerId?: string | null;
   branding?: JsonObject | null;
 }
@@ -286,7 +361,7 @@ export async function updateTenant(id: string, input: UpdateTenantInput) {
     if (!reseller) throw new AppError(400, "Reseller not found", "RESELLER_NOT_FOUND");
   }
 
-  return prisma.tenant.update({
+  const updated = await prisma.tenant.update({
     where: { id },
     data: {
       name: input.name?.trim(),
@@ -297,6 +372,12 @@ export async function updateTenant(id: string, input: UpdateTenantInput) {
       branding: input.branding === undefined ? undefined : asJson(input.branding),
     },
   });
+
+  if (input.modules) {
+    await applyTenantModuleSelection(id, input.modules);
+  }
+
+  return updated;
 }
 
 export async function setTenantStatus(id: string, status: TenantStatus) {

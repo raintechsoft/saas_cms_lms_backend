@@ -49,6 +49,25 @@ export async function updateDocumentTemplate(
   return prisma.documentTemplate.update({ where: { id: templateId }, data: input });
 }
 
+export async function deleteDocumentTemplate(tenantId: string, templateId: string) {
+  const template = await prisma.documentTemplate.findFirst({
+    where: tenantScope(tenantId, { id: templateId }),
+    include: { _count: { select: { documents: true } } },
+  });
+  if (!template) throw new AppError(404, "Document template not found", "TEMPLATE_NOT_FOUND");
+  // Generated documents keep a Restrict FK to their template, so a template
+  // that has already been used is archived instead of hard-deleted.
+  if (template._count.documents > 0) {
+    await prisma.documentTemplate.update({
+      where: { id: templateId },
+      data: { isActive: false },
+    });
+    return { deleted: false, deactivated: true };
+  }
+  await prisma.documentTemplate.delete({ where: { id: templateId } });
+  return { deleted: true, deactivated: false };
+}
+
 export async function generateDocument(
   tenantId: string,
   generatedById: string,
@@ -171,17 +190,40 @@ export async function listGeneratedDocuments(
   tenantId: string,
   query: { type?: DocumentTemplateType; studentId?: string; staffId?: string },
 ) {
+  // Keep list rows slim: full template rows carry multi-MB background data URLs
+  // and the payload column snapshots the whole student/result — both are only
+  // needed on the single-document print endpoint.
   return prisma.generatedDocument.findMany({
     where: tenantScope(tenantId, {
       ...(query.studentId ? { studentId: query.studentId } : {}),
       ...(query.staffId ? { staffId: query.staffId } : {}),
       ...(query.type ? { template: { type: query.type } } : {}),
     }),
-    include: {
-      template: true,
-      student: true,
-      staff: { include: { user: true } },
-      exam: true,
+    select: {
+      id: true,
+      serialNumber: true,
+      barcodeValue: true,
+      generatedAt: true,
+      template: {
+        select: { id: true, type: true, name: true, width: true, height: true, isActive: true },
+      },
+      student: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          admissionNumber: true,
+          photoUrl: true,
+        },
+      },
+      staff: {
+        select: {
+          id: true,
+          employeeNumber: true,
+          user: { select: { firstName: true, lastName: true } },
+        },
+      },
+      exam: { select: { id: true, name: true } },
       generatedBy: { select: { firstName: true, lastName: true } },
     },
     orderBy: { generatedAt: "desc" },

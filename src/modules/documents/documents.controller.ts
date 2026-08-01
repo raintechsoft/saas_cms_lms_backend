@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import {
   createDocumentTemplate,
+  deleteDocumentTemplate,
   generateDocument,
   getGeneratedDocument,
   listDocumentTemplates,
@@ -17,7 +18,8 @@ const templateBody = z.object({
   name: z.string().trim().min(1).max(100),
   backgroundUrl: z
     .string()
-    .max(3_000_000)
+    // A 5MB image becomes ~6.8M characters as a base64 data URL.
+    .max(8_000_000)
     .nullable()
     .optional()
     .refine(
@@ -73,6 +75,11 @@ export async function updateDocumentTemplateController(req: Request, res: Respon
       config: body.config as Prisma.InputJsonValue | undefined,
     }),
   });
+}
+
+export async function deleteDocumentTemplateController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await deleteDocumentTemplate(req.auth!.tenantId!, id) });
 }
 
 export async function generateDocumentController(req: Request, res: Response) {

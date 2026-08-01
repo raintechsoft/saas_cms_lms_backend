@@ -210,6 +210,7 @@ import {
 } from "../../modules/hr/hr.controller.js";
 import {
   createDocumentTemplateController,
+  deleteDocumentTemplateController,
   generateDocumentController,
   getGeneratedDocumentController,
   listDocumentTemplatesController,
@@ -231,6 +232,7 @@ import {
 import {
   createHomeworkController,
   evaluateHomeworkSubmissionController,
+  getHomeworkController,
   getHomeworkReportController,
   getHomeworkSetupController,
   getHomeworkSubmissionsController,
@@ -266,6 +268,8 @@ const campusRouter = Router();
 campusRouter.use(authenticate, requireTenant);
 campusRouter.use(auditTenantMutation);
 campusRouter.use("/students", requireModule("students"));
+campusRouter.use("/notices", requireModule("notices"));
+campusRouter.use("/erp", requireEntitlement("CMS"), requireModule("erp"));
 campusRouter.use("/academics", requireModule("academics"));
 campusRouter.use("/fees", requireEntitlement("CMS"), requireModule("fees"));
 campusRouter.use("/attendance", requireModule("attendance"));
@@ -1238,6 +1242,11 @@ campusRouter.put(
   requirePermission("documents.manage"),
   asyncHandler(updateDocumentTemplateController),
 );
+campusRouter.delete(
+  "/documents/templates/:id",
+  requirePermission("documents.manage"),
+  asyncHandler(deleteDocumentTemplateController),
+);
 campusRouter.get(
   "/documents/generated",
   requirePermission("documents.view"),
@@ -1300,6 +1309,11 @@ campusRouter.get(
   "/homework/setup",
   requirePermission("homework.view"),
   asyncHandler(getHomeworkSetupController),
+);
+campusRouter.get(
+  "/homework/:id",
+  requirePermission("homework.view"),
+  asyncHandler(getHomeworkController),
 );
 campusRouter.post(
   "/homework",
