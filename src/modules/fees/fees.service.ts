@@ -1358,7 +1358,18 @@ export async function searchPayments(tenantId: string, query?: string) {
         }
       : {}),
     include: {
-      student: true,
+      student: {
+        include: {
+          enrollments: {
+            where: { status: EnrollmentStatus.ACTIVE },
+            orderBy: { enrolledAt: "desc" },
+            take: 1,
+            include: {
+              classSection: { include: { academicClass: true, section: true } },
+            },
+          },
+        },
+      },
       academicSession: true,
       createdBy: { select: { firstName: true, lastName: true } },
       items: {
