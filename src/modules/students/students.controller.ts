@@ -16,6 +16,13 @@ import {
   updateStudent,
 } from "./students.service.js";
 import {
+  getStudentExams,
+  getStudentPortalAccounts,
+  getStudentSubjects,
+  getStudentTimeline,
+  resetStudentPortalPassword,
+} from "./students-360.service.js";
+import {
   acceptOnlineAdmission,
   listOnlineAdmissions,
   rejectOnlineAdmission,
@@ -210,5 +217,42 @@ export async function rejectOnlineAdmissionController(req: Request, res: Respons
   const body = reviewBody.parse(req.body);
   res.json({
     data: await rejectOnlineAdmission(req.auth!.tenantId!, id, req.auth!.userId, body.note),
+  });
+}
+
+export async function getStudentExamsController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getStudentExams(req.auth!.tenantId!, id) });
+}
+
+export async function getStudentSubjectsController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getStudentSubjects(req.auth!.tenantId!, id) });
+}
+
+export async function getStudentTimelineController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getStudentTimeline(req.auth!.tenantId!, id) });
+}
+
+export async function getStudentPortalAccountsController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getStudentPortalAccounts(req.auth!.tenantId!, id) });
+}
+
+const portalPasswordBody = z.object({
+  role: z.enum(["STUDENT", "PARENT"]),
+  guardianUserId: z.string().min(1).nullable().optional(),
+  sendEmail: z.boolean().optional(),
+});
+
+export async function resetStudentPortalPasswordController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await resetStudentPortalPassword(
+      req.auth!.tenantId!,
+      id,
+      portalPasswordBody.parse(req.body),
+    ),
   });
 }

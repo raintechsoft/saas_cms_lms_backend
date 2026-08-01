@@ -56,7 +56,7 @@ async function main() {
         email,
         passwordHash: await bcrypt.hash(password, 12),
         firstName: student.firstName,
-        lastName: student.lastName,
+        lastName: student.lastName ?? "",
         status: "ACTIVE",
       },
     });

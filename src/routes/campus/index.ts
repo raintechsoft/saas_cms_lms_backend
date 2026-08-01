@@ -74,6 +74,11 @@ import {
   rejectOnlineAdmissionController,
   updateStudentController,
   addEnrollmentController,
+  getStudentExamsController,
+  getStudentSubjectsController,
+  getStudentTimelineController,
+  getStudentPortalAccountsController,
+  resetStudentPortalPasswordController,
 } from "../../modules/students/students.controller.js";
 import {
   createCampusNoticeController,
@@ -614,6 +619,31 @@ campusRouter.get(
   "/students/:id/siblings/detect",
   requirePermission("students.view"),
   asyncHandler(detectSiblingsController),
+);
+campusRouter.get(
+  "/students/:id/exams",
+  requirePermission("students.view"),
+  asyncHandler(getStudentExamsController),
+);
+campusRouter.get(
+  "/students/:id/subjects",
+  requirePermission("students.view"),
+  asyncHandler(getStudentSubjectsController),
+);
+campusRouter.get(
+  "/students/:id/timeline",
+  requirePermission("students.view"),
+  asyncHandler(getStudentTimelineController),
+);
+campusRouter.get(
+  "/students/:id/portal-accounts",
+  requirePermission("students.view"),
+  asyncHandler(getStudentPortalAccountsController),
+);
+campusRouter.post(
+  "/students/:id/portal-password-reset",
+  requirePermission("students.manage"),
+  asyncHandler(resetStudentPortalPasswordController),
 );
 campusRouter.put(
   "/students/:id",
