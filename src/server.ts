@@ -3,6 +3,7 @@ import { isMailConfigured } from "./lib/mail.js";
 import { prisma } from "./lib/prisma.js";
 import { ensureLocalUploadDirs, getStorageDriver } from "./lib/uploads.js";
 import { processScheduledFeeReminders } from "./modules/fees/fee-reminders.service.js";
+import { processScheduledPortalInactiveReminders } from "./modules/students/app-download-status.service.js";
 import { app } from "./app.js";
 
 await ensureLocalUploadDirs();
@@ -32,12 +33,17 @@ const server = app.listen(env.API_PORT, () => {
       : "[push] Push env not set — configure PUSH_VAPID_* to enable browser push",
   );
   console.log("[fee-reminders] Scheduler armed (every 60s)");
+  console.log("[portal-login-reminders] Scheduler armed (every 60s)");
 });
 
 const reminderTimer = setInterval(() => {
   void processScheduledFeeReminders().catch((error) => {
     const message = error instanceof Error ? error.message : "scheduler failed";
     console.error(`[fee-reminders] ${message}`);
+  });
+  void processScheduledPortalInactiveReminders().catch((error) => {
+    const message = error instanceof Error ? error.message : "scheduler failed";
+    console.error(`[portal-login-reminders] ${message}`);
   });
 }, REMINDER_TICK_MS);
 reminderTimer.unref?.();

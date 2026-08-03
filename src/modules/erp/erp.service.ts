@@ -156,7 +156,7 @@ export async function getErpSetup(tenantId: string) {
       orderBy: { name: "asc" },
     }),
     prisma.studentDocument.findMany({
-      where: tenantScope(tenantId, {}),
+      where: tenantScope(tenantId, { deletedAt: null }),
       include: { student: true, folder: true, uploadedBy: true },
       orderBy: { createdAt: "desc" },
       take: 200,
@@ -465,11 +465,29 @@ export async function createStudentDocument(
   });
 }
 
-export async function deleteStudentDocument(tenantId: string, id: string) {
-  const result = await prisma.studentDocument.deleteMany({
-    where: tenantScope(tenantId, { id }),
+export async function deleteStudentDocument(
+  tenantId: string,
+  id: string,
+  deletedById?: string,
+  reason?: string,
+) {
+  const trimmed = reason?.trim() ?? "";
+  if (trimmed.length < 3) {
+    throw new AppError(400, "Delete reason is required (min 3 characters)", "REASON_REQUIRED");
+  }
+  const existing = await prisma.studentDocument.findFirst({
+    where: tenantScope(tenantId, { id, deletedAt: null }),
+    select: { id: true },
   });
-  if (!result.count) throw new AppError(404, "Student document not found", "DOCUMENT_NOT_FOUND");
+  if (!existing) throw new AppError(404, "Student document not found", "DOCUMENT_NOT_FOUND");
+  await prisma.studentDocument.update({
+    where: { id },
+    data: {
+      deletedAt: new Date(),
+      deleteReason: trimmed.slice(0, 500),
+      deletedById: deletedById ?? null,
+    },
+  });
   return { deleted: true };
 }
 

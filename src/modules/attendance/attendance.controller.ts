@@ -5,6 +5,12 @@ import {
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
+  getAttendanceReportCatalog,
+  runAttendancePackReport,
+  scanAttendance,
+  type AttendancePackReportKey,
+} from "./attendance-extensions.service.js";
+import {
   awardAttendancePoints,
   createLeave,
   getAttendancePoints,
@@ -49,6 +55,21 @@ const leaveBody = z.object({
   toDate: z.coerce.date(),
   reason: z.string().trim().min(3).max(1000),
   status: z.nativeEnum(LeaveStatus).optional(),
+  attachmentUrl: z
+    .string()
+    .trim()
+    .min(1)
+    .max(30_000_000)
+    .refine(
+      (value) =>
+        value.startsWith("http://") ||
+        value.startsWith("https://") ||
+        value.startsWith("data:") ||
+        value.startsWith("/"),
+      "Attachment must be a URL, data URL, or uploaded path",
+    )
+    .nullable()
+    .optional(),
 });
 const leaveQuery = z.object({ status: z.nativeEnum(LeaveStatus).optional() });
 const reviewBody = z.object({
@@ -62,6 +83,35 @@ const pointBody = z.object({
   note: z.string().trim().max(500).nullable().optional(),
 });
 const pointQuery = z.object({ sessionId: z.string().min(1) });
+const scanBody = z.object({
+  code: z.string().trim().min(1).max(200),
+  mode: z.enum(["IN", "OUT"]),
+  deviceType: z.enum(["BARCODE", "RFID", "BIOMETRIC"]).optional(),
+  classSectionId: z.string().min(1).optional(),
+  attendanceDate: z.coerce.date().optional(),
+  periodKey: z.string().trim().min(1).max(50).optional(),
+  scanTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+});
+const packReportQuery = z.object({
+  reportKey: z.enum([
+    "daily_attendance",
+    "custom_attendance",
+    "remaining_class",
+    "student_summary",
+    "staff_summary",
+    "inout_time",
+    "period_wise",
+    "class_wise",
+  ]),
+  date: z.coerce.date().optional(),
+  fromDate: z.coerce.date().optional(),
+  toDate: z.coerce.date().optional(),
+  classSectionId: z.string().min(1).optional(),
+  periodKey: z.string().trim().min(1).max(50).optional(),
+  month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  status: z.nativeEnum(AttendanceStatus).optional(),
+  threshold: z.coerce.number().min(0).max(100).optional(),
+});
 
 export async function getAttendanceSetupController(req: Request, res: Response) {
   res.json({
@@ -130,9 +180,16 @@ export async function getAttendancePointsController(req: Request, res: Response)
 }
 
 export async function getAttendancePointScoresController(req: Request, res: Response) {
-  const query = z.object({ sessionId: z.string().min(1).optional() }).parse(req.query);
+  const query = z.object({
+    sessionId: z.string().min(1).optional(),
+    month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  }).parse(req.query);
   res.json({
-    data: await getAttendancePointScores(req.auth!.tenantId!, query.sessionId),
+    data: await getAttendancePointScores(
+      req.auth!.tenantId!,
+      query.sessionId,
+      query.month,
+    ),
   });
 }
 
@@ -148,5 +205,29 @@ export async function updateAttendancePointConfigController(req: Request, res: R
       req.auth!.tenantId!,
       pointConfigBody.parse(req.body),
     ),
+  });
+}
+
+export async function scanAttendanceController(req: Request, res: Response) {
+  res.json({
+    data: await scanAttendance(
+      req.auth!.tenantId!,
+      req.auth!.userId,
+      scanBody.parse(req.body),
+    ),
+  });
+}
+
+export async function getAttendanceReportCatalogController(_req: Request, res: Response) {
+  res.json({ data: getAttendanceReportCatalog() });
+}
+
+export async function runAttendancePackReportController(req: Request, res: Response) {
+  const query = packReportQuery.parse(req.query);
+  res.json({
+    data: await runAttendancePackReport(req.auth!.tenantId!, {
+      ...query,
+      reportKey: query.reportKey as AttendancePackReportKey,
+    }),
   });
 }

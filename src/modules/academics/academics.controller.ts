@@ -59,6 +59,9 @@ const classBody = z.object({
   sortOrder: z.number().int().min(0).max(1000).default(0),
   academicSessionId: z.string().min(1).optional(),
   sectionIds: z.array(z.string().min(1)).max(50).optional(),
+  inTime: z.string().trim().max(10).nullable().optional(),
+  halfDayTime: z.string().trim().max(10).nullable().optional(),
+  outTime: z.string().trim().max(10).nullable().optional(),
   classTeacherId: z
     .preprocess((value) => (value === "" || value === undefined ? null : value), z.string().min(1).nullable())
     .optional(),
@@ -139,7 +142,7 @@ const promotionBody = z.object({
       z.object({
         studentEnrollmentId: z.string().min(1),
         result: z.enum(["PASS", "FAIL"]),
-        action: z.enum(["CONTINUE", "LEAVE"]),
+        action: z.enum(["CONTINUE", "LEAVE", "SKIP"]),
       }),
     )
     .min(1),
@@ -197,6 +200,7 @@ const scholarBody = z.object({
   scholarshipType: z.nativeEnum(ScholarshipType),
   scholarshipName: z.string().trim().min(1).max(150),
   amount: z.number().min(0),
+  finalPercent: z.number().min(0).max(100).nullable().optional(),
   validFrom: z.coerce.date(),
   validTo: z.coerce.date(),
   status: z.nativeEnum(ScholarStatus).optional(),
@@ -210,8 +214,38 @@ const scholarUpdateBody = scholarBody
   .omit({ studentId: true, academicSessionId: true })
   .partial();
 
+const STUDENT_DETAIL_FIELDS = [
+  "religion",
+  "caste",
+  "mobile",
+  "email",
+  "bloodGroup",
+  "nationality",
+  "currentAddress",
+  "permanentAddress",
+  "fatherName",
+  "fatherPhone",
+  "fatherOccupation",
+  "motherName",
+  "motherPhone",
+  "motherOccupation",
+  "guardianName",
+  "guardianPhone",
+  "guardianRelation",
+  "transportRoute",
+  "hostelRoom",
+  "additionalNotes",
+] as const;
+
 const bulkUpdateBody = z.object({
-  updateType: z.enum(["SECTION_MOVE", "STATUS", "SESSION_CLASS", "SUBJECT_ASSIGN", "CONCESSION"]),
+  updateType: z.enum([
+    "SECTION_MOVE",
+    "STATUS",
+    "SESSION_CLASS",
+    "SUBJECT_ASSIGN",
+    "CONCESSION",
+    "STUDENT_DETAILS",
+  ]),
   summary: z.string().trim().max(500).optional(),
   sectionMove: bulkSectionBody.optional(),
   statusUpdate: z
@@ -245,6 +279,13 @@ const bulkUpdateBody = z.object({
       academicSessionId: z.string().min(1),
     })
     .optional(),
+  studentDetailsUpdate: z
+    .object({
+      studentIds: z.array(z.string().min(1)).min(1).max(500),
+      field: z.enum(STUDENT_DETAIL_FIELDS),
+      value: z.string().trim().max(2000).nullable(),
+    })
+    .optional(),
 });
 
 const academicReportQuery = z.object({
@@ -255,6 +296,11 @@ const academicReportQuery = z.object({
   examId: z.string().min(1).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  weekday: z
+    .enum(["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"])
+    .optional(),
+  startTime: z.string().trim().max(10).optional(),
+  endTime: z.string().trim().max(10).optional(),
   format: z.enum(["json", "csv"]).default("json"),
 });
 
@@ -309,7 +355,17 @@ export async function updateClassController(req: Request, res: Response) {
     data: await updateClass(
       req.auth!.tenantId!,
       id,
-      classBody.pick({ name: true, code: true, sortOrder: true }).partial().parse(req.body),
+      classBody
+        .pick({
+          name: true,
+          code: true,
+          sortOrder: true,
+          inTime: true,
+          halfDayTime: true,
+          outTime: true,
+        })
+        .partial()
+        .parse(req.body),
     ),
   });
 }

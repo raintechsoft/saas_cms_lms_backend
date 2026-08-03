@@ -21,11 +21,13 @@ const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   tenantSlug: z.string().min(2).max(100).optional(),
+  channel: z.enum(["WEB", "APP"]).optional(),
 });
 
 const tenantScopedSchema = z.object({
   email: z.string().email(),
   tenantSlug: z.string().min(2).max(100).optional(),
+  channel: z.enum(["WEB", "APP"]).optional(),
 });
 
 const verifyOtpSchema = tenantScopedSchema.extend({
@@ -42,11 +44,13 @@ const resetPasswordSchema = z.object({
 const googleLoginSchema = z.object({
   idToken: z.string().min(20),
   tenantSlug: z.string().min(2).max(100).optional(),
+  channel: z.enum(["WEB", "APP"]).optional(),
 });
 
 const msg91OtpLoginSchema = z.object({
   accessToken: z.string().min(20),
   tenantSlug: z.string().min(2).max(100).optional(),
+  channel: z.enum(["WEB", "APP"]).optional(),
 });
 
 const profileUpdateSchema = z.object({

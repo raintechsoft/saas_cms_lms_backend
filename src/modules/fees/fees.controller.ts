@@ -27,7 +27,9 @@ import {
   getFeeSetup,
   getFeeSummary,
   listFeeInvoices,
+  listFeeMasterAssignCandidates,
   listStudentFees,
+  reorderFeeMasters,
   revertPayment,
   searchPayments,
   setFeeInvoiceStatus,
@@ -125,7 +127,10 @@ const customFeeActiveBody = z.object({
   isActive: z.boolean(),
 });
 const assignmentBody = z.object({
-  enrollmentIds: z.array(z.string().min(1)).min(1).optional(),
+  enrollmentIds: z.array(z.string().min(1)).optional(),
+});
+const reorderMastersBody = z.object({
+  orderedIds: z.array(z.string().min(1)).min(1),
 });
 const discountAssignmentBody = z.object({
   discountId: z.string().min(1).nullable(),
@@ -144,6 +149,8 @@ const paymentBody = z.object({
   items: z.array(z.object({
     assignmentId: z.string().min(1),
     amount: z.coerce.number().positive(),
+    discountAmount: z.coerce.number().min(0).optional(),
+    fineAmount: z.coerce.number().min(0).optional(),
   })).min(1),
 });
 const paymentSearchQuery = z.object({ query: z.string().trim().max(100).optional() });
@@ -324,6 +331,16 @@ export async function assignFeeMasterController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   const { enrollmentIds } = assignmentBody.parse(req.body);
   res.json({ data: await assignFeeMaster(req.auth!.tenantId!, id, enrollmentIds) });
+}
+
+export async function listFeeMasterAssignCandidatesController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await listFeeMasterAssignCandidates(req.auth!.tenantId!, id) });
+}
+
+export async function reorderFeeMastersController(req: Request, res: Response) {
+  const { orderedIds } = reorderMastersBody.parse(req.body);
+  res.json({ data: await reorderFeeMasters(req.auth!.tenantId!, orderedIds) });
 }
 
 export async function updateAssignmentDiscountController(req: Request, res: Response) {

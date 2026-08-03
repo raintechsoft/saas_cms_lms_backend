@@ -316,6 +316,7 @@ export async function createSchoolScholar(
     scholarshipType: ScholarshipType;
     scholarshipName: string;
     amount: number;
+    finalPercent?: number | null;
     validFrom: Date;
     validTo: Date;
     status?: ScholarStatus;
@@ -327,6 +328,9 @@ export async function createSchoolScholar(
     throw new AppError(400, "Valid-to date must be on or after valid-from", "INVALID_DATES");
   }
   if (input.amount < 0) throw new AppError(400, "Amount cannot be negative", "INVALID_AMOUNT");
+  if (input.finalPercent != null && (input.finalPercent < 0 || input.finalPercent > 100)) {
+    throw new AppError(400, "Final percent must be between 0 and 100", "INVALID_PERCENT");
+  }
 
   const [student, session] = await Promise.all([
     prisma.student.findFirst({ where: tenantScope(tenantId, { id: input.studentId }), select: { id: true } }),
@@ -354,6 +358,8 @@ export async function createSchoolScholar(
       scholarshipType: input.scholarshipType,
       scholarshipName: input.scholarshipName.trim(),
       amount: new Prisma.Decimal(input.amount),
+      finalPercent:
+        input.finalPercent == null ? null : new Prisma.Decimal(input.finalPercent),
       validFrom: input.validFrom,
       validTo: input.validTo,
       status: input.status ?? ScholarStatus.ACTIVE,
@@ -371,6 +377,7 @@ export async function updateSchoolScholar(
     scholarshipType?: ScholarshipType;
     scholarshipName?: string;
     amount?: number;
+    finalPercent?: number | null;
     validFrom?: Date;
     validTo?: Date;
     status?: ScholarStatus;
@@ -391,6 +398,9 @@ export async function updateSchoolScholar(
   if (input.amount !== undefined && input.amount < 0) {
     throw new AppError(400, "Amount cannot be negative", "INVALID_AMOUNT");
   }
+  if (input.finalPercent != null && (input.finalPercent < 0 || input.finalPercent > 100)) {
+    throw new AppError(400, "Final percent must be between 0 and 100", "INVALID_PERCENT");
+  }
   if (input.feeDiscountId) {
     const discount = await prisma.feeDiscount.findFirst({
       where: tenantScope(tenantId, { id: input.feeDiscountId }),
@@ -405,6 +415,12 @@ export async function updateSchoolScholar(
       scholarshipType: input.scholarshipType,
       scholarshipName: input.scholarshipName?.trim(),
       amount: input.amount === undefined ? undefined : new Prisma.Decimal(input.amount),
+      finalPercent:
+        input.finalPercent === undefined
+          ? undefined
+          : input.finalPercent == null
+            ? null
+            : new Prisma.Decimal(input.finalPercent),
       validFrom: input.validFrom,
       validTo: input.validTo,
       status: input.status,
@@ -499,7 +515,7 @@ export async function applyAcademicBulkUpdate(
   tenantId: string,
   actorId: string,
   input: {
-    updateType: "SECTION_MOVE" | "STATUS" | "SESSION_CLASS" | "SUBJECT_ASSIGN" | "CONCESSION";
+    updateType: "SECTION_MOVE" | "STATUS" | "SESSION_CLASS" | "SUBJECT_ASSIGN" | "CONCESSION" | "STUDENT_DETAILS";
     summary?: string;
     sectionMove?: {
       fromClassSectionId: string;
@@ -526,6 +542,11 @@ export async function applyAcademicBulkUpdate(
       studentIds: string[];
       feeDiscountId: string | null;
       academicSessionId: string;
+    };
+    studentDetailsUpdate?: {
+      studentIds: string[];
+      field: string;
+      value: string | null;
     };
   },
 ) {
@@ -702,6 +723,47 @@ export async function applyAcademicBulkUpdate(
       result = { updatedStudents: [...new Set(affectedIds)].length };
     }
 
+    if (input.updateType === "STUDENT_DETAILS") {
+      if (!input.studentDetailsUpdate?.studentIds.length) {
+        throw new AppError(400, "studentDetailsUpdate payload required", "MISSING_PAYLOAD");
+      }
+      const allowed = new Set([
+        "religion",
+        "caste",
+        "mobile",
+        "email",
+        "bloodGroup",
+        "nationality",
+        "currentAddress",
+        "permanentAddress",
+        "fatherName",
+        "fatherPhone",
+        "fatherOccupation",
+        "motherName",
+        "motherPhone",
+        "motherOccupation",
+        "guardianName",
+        "guardianPhone",
+        "guardianRelation",
+        "transportRoute",
+        "hostelRoom",
+        "additionalNotes",
+      ]);
+      if (!allowed.has(input.studentDetailsUpdate.field)) {
+        throw new AppError(400, "Unsupported student detail field", "INVALID_FIELD");
+      }
+      const value =
+        input.studentDetailsUpdate.value == null || input.studentDetailsUpdate.value === ""
+          ? null
+          : input.studentDetailsUpdate.value;
+      const updated = await tx.student.updateMany({
+        where: tenantScope(tenantId, { id: { in: input.studentDetailsUpdate.studentIds } }),
+        data: { [input.studentDetailsUpdate.field]: value },
+      });
+      affectedIds.push(...input.studentDetailsUpdate.studentIds);
+      result = { updated: updated.count, field: input.studentDetailsUpdate.field };
+    }
+
     await tx.academicBulkUpdateLog.create({
       data: {
         tenantId,
@@ -734,11 +796,21 @@ export async function applyAcademicBulkUpdate(
 
 export async function getAcademicReportCatalog() {
   return [
+    {
+      key: "class_wise_subjects",
+      label: "Class wise Subject Report",
+      description: "Subjects assigned to each class-section",
+    },
+    { key: "timetable", label: "Timetable Report", description: "Class timetable entries" },
+    {
+      key: "free_periods",
+      label: "Free Class Period Report",
+      description: "Class sections free for a weekday and time slot",
+    },
     { key: "students", label: "Students", description: "Active students by class/section" },
     { key: "attendance", label: "Attendance", description: "Attendance summary for session" },
     { key: "marks", label: "Marks / Exam Rank", description: "Exam results when exam selected" },
     { key: "toppers", label: "Toppers", description: "Top ranked exam students" },
-    { key: "timetable", label: "Timetable", description: "Class timetable entries" },
     { key: "fees", label: "Due Fees", description: "Due fees snapshot for selected filters" },
     { key: "scholars", label: "School Scholars", description: "Scholarship awards" },
     { key: "promotions", label: "Active Enrollments", description: "Active enrollments for the selected session" },
@@ -763,6 +835,9 @@ export async function runAcademicReport(
     examId?: string;
     from?: Date;
     to?: Date;
+    weekday?: "MONDAY" | "TUESDAY" | "WEDNESDAY" | "THURSDAY" | "FRIDAY" | "SATURDAY" | "SUNDAY";
+    startTime?: string;
+    endTime?: string;
     format?: "json" | "csv";
   },
 ) {
@@ -777,6 +852,60 @@ export async function runAcademicReport(
   let columns: string[] = [];
 
   switch (query.reportKey) {
+    case "class_wise_subjects": {
+      const classSubjects = await prisma.classSubject.findMany({
+        where: tenantScope(tenantId, {
+          ...(query.classSectionId ? { classSectionId: query.classSectionId } : {}),
+          classSection: {
+            ...(session ? { academicSessionId: session.id } : {}),
+            ...(query.classId && !query.classSectionId ? { classId: query.classId } : {}),
+          },
+        }),
+        include: {
+          subject: true,
+          teacher: { select: { firstName: true, lastName: true } },
+          classSection: { include: { academicClass: true, section: true } },
+        },
+        orderBy: [
+          { classSection: { academicClass: { sortOrder: "asc" } } },
+          { classSection: { section: { name: "asc" } } },
+          { subject: { name: "asc" } },
+        ],
+      });
+      columns = ["class", "section", "subject", "code", "type", "deliveryType", "teacher"];
+      rows = classSubjects.map((row) => ({
+        class: row.classSection.academicClass.name,
+        section: row.classSection.section.name,
+        subject: row.subject.name,
+        code: row.subject.code ?? "",
+        type: row.subject.type,
+        deliveryType: row.subject.deliveryType,
+        teacher: row.teacher ? `${row.teacher.firstName} ${row.teacher.lastName ?? ""}`.trim() : "",
+      }));
+      break;
+    }
+    case "free_periods": {
+      if (!session) throw new AppError(400, "Academic session is required", "SESSION_REQUIRED");
+      if (!query.weekday || !query.startTime || !query.endTime) {
+        throw new AppError(400, "weekday, startTime and endTime are required", "FREE_PERIOD_FILTERS_REQUIRED");
+      }
+      const { getFreePeriodReport } = await import("../timetable/timetable.service.js");
+      const free = await getFreePeriodReport(tenantId, {
+        sessionId: session.id,
+        weekday: query.weekday,
+        startTime: query.startTime,
+        endTime: query.endTime,
+      });
+      columns = ["class", "section", "weekday", "startTime", "endTime"];
+      rows = free.map((row) => ({
+        class: row.academicClass.name,
+        section: row.section.name,
+        weekday: query.weekday,
+        startTime: query.startTime,
+        endTime: query.endTime,
+      }));
+      break;
+    }
     case "students": {
       const enrollments = await prisma.studentEnrollment.findMany({
         where: tenantScope(tenantId, {
@@ -1048,6 +1177,9 @@ export async function createClassWithSections(
     academicSessionId?: string;
     sectionIds?: string[];
     classTeacherId?: string | null;
+    inTime?: string | null;
+    halfDayTime?: string | null;
+    outTime?: string | null;
   },
 ) {
   const { createClass, createClassSection } = await import("./academics.service.js");
@@ -1055,6 +1187,9 @@ export async function createClassWithSections(
     name: input.name,
     code: input.code,
     sortOrder: input.sortOrder,
+    inTime: input.inTime,
+    halfDayTime: input.halfDayTime,
+    outTime: input.outTime,
   });
 
   const createdSections = [];

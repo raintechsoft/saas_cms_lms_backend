@@ -25,11 +25,13 @@ interface LoginInput {
   email: string;
   password: string;
   tenantSlug?: string;
+  channel?: "WEB" | "APP";
 }
 
 interface TenantScopedInput {
   email: string;
   tenantSlug?: string;
+  channel?: "WEB" | "APP";
 }
 
 interface AccessTokenPayload extends jwt.JwtPayload {
@@ -105,7 +107,10 @@ function assertUserCanSignIn(user: LoadedUser) {
   }
 }
 
-export async function buildLoginResult(user: LoadedUser) {
+export async function buildLoginResult(
+  user: LoadedUser,
+  options?: { channel?: "WEB" | "APP" },
+) {
   assertUserCanSignIn(user);
 
   const accessToken = jwt.sign(
@@ -122,6 +127,21 @@ export async function buildLoginResult(user: LoadedUser) {
     },
   );
 
+  const now = new Date();
+  const channel = options?.channel === "APP" ? "APP" : "WEB";
+  await prisma.user
+    .update({
+      where: { id: user.id },
+      data: {
+        firstLoginAt: user.firstLoginAt ?? now,
+        lastLoginAt: now,
+        lastLoginChannel: channel,
+      },
+    })
+    .catch((error: unknown) => {
+      console.error("Unable to record portal login timestamps", error);
+    });
+
   if (user.tenantId) {
     await prisma.auditLog
       .create({
@@ -130,6 +150,7 @@ export async function buildLoginResult(user: LoadedUser) {
           userId: user.id,
           action: "LOGIN",
           entityType: "USER_SESSION",
+          metadata: { channel },
         },
       })
       .catch((error: unknown) => {
@@ -180,7 +201,7 @@ export async function login(input: LoginInput) {
   ) {
     throw new AppError(401, "Invalid credentials", "INVALID_CREDENTIALS");
   }
-  return buildLoginResult(user);
+  return buildLoginResult(user, { channel: input.channel });
 }
 
 export async function requestLoginOtp(input: TenantScopedInput) {
@@ -239,7 +260,7 @@ export async function verifyLoginOtp(input: TenantScopedInput & { code: string }
     throw new AppError(401, "Invalid or expired sign-in code", "INVALID_OTP");
   }
 
-  return buildLoginResult(user);
+  return buildLoginResult(user, { channel: input.channel });
 }
 
 async function verifyMsg91WidgetAccessToken(accessToken: string) {
@@ -333,7 +354,11 @@ async function findActiveUserByPhoneOrEmail(identifier: string, tenantSlug?: str
   return user;
 }
 
-export async function loginWithMsg91Otp(input: { accessToken: string; tenantSlug?: string }) {
+export async function loginWithMsg91Otp(input: {
+  accessToken: string;
+  tenantSlug?: string;
+  channel?: "WEB" | "APP";
+}) {
   if (!isMsg91OtpWidgetConfigured()) {
     throw new AppError(503, "MSG91 OTP widget is not configured", "MSG91_OTP_NOT_CONFIGURED");
   }
@@ -348,7 +373,7 @@ export async function loginWithMsg91Otp(input: { accessToken: string; tenantSlug
     );
   }
 
-  return buildLoginResult(user);
+  return buildLoginResult(user, { channel: input.channel });
 }
 
 export async function forgotPassword(input: TenantScopedInput) {
@@ -459,7 +484,11 @@ export async function changePassword(
   return { message: "Password updated successfully" };
 }
 
-export async function loginWithGoogle(input: { idToken: string; tenantSlug?: string }) {
+export async function loginWithGoogle(input: {
+  idToken: string;
+  tenantSlug?: string;
+  channel?: "WEB" | "APP";
+}) {
   if (!isGoogleAuthConfigured()) {
     throw new AppError(503, "Google sign-in is not configured", "GOOGLE_NOT_CONFIGURED");
   }
@@ -510,7 +539,7 @@ export async function loginWithGoogle(input: { idToken: string; tenantSlug?: str
     );
   }
 
-  return buildLoginResult(user);
+  return buildLoginResult(user, { channel: input.channel });
 }
 
 export function getAuthPublicConfig() {

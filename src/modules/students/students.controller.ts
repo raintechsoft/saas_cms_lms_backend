@@ -1,8 +1,10 @@
 import { AdmissionType, Gender, OnlineAdmissionStatus, StudentStatus } from "@prisma/client";
 import type { Request, Response } from "express";
 import { z } from "zod";
+import { AppError } from "../../lib/errors.js";
 import {
   addEnrollment,
+  bulkUploadStudentPhotos,
   createStudent,
   createStudentMaster,
   deleteStudentMaster,
@@ -22,6 +24,18 @@ import {
   getStudentTimeline,
   resetStudentPortalPassword,
 } from "./students-360.service.js";
+import {
+  getPortalLoginReminderSettings,
+  listAppDownloadStatus,
+  sendInactivePortalLoginReminders,
+  updatePortalLoginReminderSettings,
+} from "./app-download-status.service.js";
+import {
+  deleteStudentDocumentWithReason,
+  listStudentDocumentFolders,
+  listStudentDocumentsBrowser,
+  uploadStudentDocumentFile,
+} from "./student-documents.service.js";
 import {
   acceptOnlineAdmission,
   listOnlineAdmissions,
@@ -157,6 +171,17 @@ export async function deleteStudentsController(req: Request, res: Response) {
   });
 }
 
+export async function bulkUploadStudentPhotosController(req: Request, res: Response) {
+  const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  const classSectionId =
+    typeof req.body?.classSectionId === "string" && req.body.classSectionId.trim()
+      ? req.body.classSectionId.trim()
+      : null;
+  res.status(201).json({
+    data: await bulkUploadStudentPhotos(req.auth!.tenantId!, files, { classSectionId }),
+  });
+}
+
 export async function importStudentsController(req: Request, res: Response) {
   res.json({
     data: await importStudentsCsv(req.auth!.tenantId!, importBody.parse(req.body).csv),
@@ -253,6 +278,104 @@ export async function resetStudentPortalPasswordController(req: Request, res: Re
       req.auth!.tenantId!,
       id,
       portalPasswordBody.parse(req.body),
+    ),
+  });
+}
+
+const appDownloadQuery = z.object({
+  status: z.enum(["ALL", "ACTIVE", "INACTIVE", "NO_ACCOUNT"]).optional(),
+  classSectionId: z.string().min(1).optional(),
+  search: z.string().trim().max(100).optional(),
+});
+
+const reminderSettingsBody = z.object({
+  enabled: z.boolean(),
+  sendSms: z.boolean(),
+  sendEmail: z.boolean(),
+  intervalDays: z.coerce.number().int().min(1).max(90),
+});
+
+const remindBody = z.object({
+  studentId: z.string().min(1).optional(),
+});
+
+export async function listAppDownloadStatusController(req: Request, res: Response) {
+  res.json({
+    data: await listAppDownloadStatus(req.auth!.tenantId!, appDownloadQuery.parse(req.query)),
+  });
+}
+
+export async function getPortalLoginReminderSettingsController(req: Request, res: Response) {
+  res.json({ data: await getPortalLoginReminderSettings(req.auth!.tenantId!) });
+}
+
+export async function updatePortalLoginReminderSettingsController(req: Request, res: Response) {
+  res.json({
+    data: await updatePortalLoginReminderSettings(
+      req.auth!.tenantId!,
+      reminderSettingsBody.parse(req.body),
+    ),
+  });
+}
+
+export async function sendPortalLoginRemindersController(req: Request, res: Response) {
+  const body = remindBody.parse(req.body ?? {});
+  res.json({
+    data: await sendInactivePortalLoginReminders(req.auth!.tenantId!, req.auth!.userId, body),
+  });
+}
+
+const documentBrowserQuery = z.object({
+  folderId: z.string().min(1).optional(),
+  classSectionId: z.string().min(1).optional(),
+  search: z.string().trim().max(100).optional(),
+  studentId: z.string().min(1).optional(),
+});
+
+const documentDeleteBody = z.object({
+  reason: z.string().trim().min(3).max(500),
+});
+
+export async function listStudentDocumentFoldersController(req: Request, res: Response) {
+  res.json({ data: await listStudentDocumentFolders(req.auth!.tenantId!) });
+}
+
+export async function listStudentDocumentsBrowserController(req: Request, res: Response) {
+  res.json({
+    data: await listStudentDocumentsBrowser(
+      req.auth!.tenantId!,
+      documentBrowserQuery.parse(req.query),
+    ),
+  });
+}
+
+export async function uploadStudentDocumentController(req: Request, res: Response) {
+  const file = req.file;
+  if (!file) throw new AppError(400, "Document file is required", "FILE_REQUIRED");
+  const body = z
+    .object({
+      studentId: z.string().min(1),
+      folderId: z.string().min(1),
+      name: z.string().trim().max(200).optional(),
+    })
+    .parse(req.body);
+  res.status(201).json({
+    data: await uploadStudentDocumentFile(req.auth!.tenantId!, req.auth!.userId, {
+      ...body,
+      file,
+    }),
+  });
+}
+
+export async function deleteStudentDocumentManagedController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const body = documentDeleteBody.parse(req.body ?? {});
+  res.json({
+    data: await deleteStudentDocumentWithReason(
+      req.auth!.tenantId!,
+      req.auth!.userId,
+      id,
+      body.reason,
     ),
   });
 }

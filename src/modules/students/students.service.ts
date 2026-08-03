@@ -7,11 +7,13 @@ import {
   TenantType,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import path from "node:path";
 import { randomInt } from "node:crypto";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { ensureTenantRoles } from "../../lib/tenant-bootstrap.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
+import { persistAvatarUpload } from "../../lib/uploads.js";
 
 interface StudentInput {
   admissionNumber?: string;
@@ -516,6 +518,7 @@ export async function getStudentDetail(tenantId: string, id: string) {
     include: {
       ...studentInclude,
       documents: {
+        where: { deletedAt: null },
         include: { folder: true },
         orderBy: { createdAt: "desc" },
         take: 50,
@@ -561,6 +564,154 @@ export async function deleteStudents(tenantId: string, ids: string[]) {
     where: tenantScope(tenantId, { id: { in: unique } }),
   });
   return { deleted: result.count };
+}
+
+function admissionKeyFromFilename(originalName: string) {
+  const base = path.basename(originalName).trim();
+  const allowed = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+  let stem = base;
+  let stripped = false;
+
+  // Strip one or more image extensions (handles SCL-1.jpg.jpg from Windows rename).
+  for (;;) {
+    const ext = path.extname(stem).toLowerCase();
+    if (!allowed.has(ext)) break;
+    stem = stem.slice(0, stem.length - ext.length).trim();
+    stripped = true;
+  }
+
+  if (!stripped || !stem) return null;
+  return stem;
+}
+
+export async function bulkUploadStudentPhotos(
+  tenantId: string,
+  files: Express.Multer.File[],
+  options?: { classSectionId?: string | null },
+) {
+  if (!files.length) {
+    throw new AppError(400, "Select at least one image file", "FILES_REQUIRED");
+  }
+  if (files.length > 20) {
+    throw new AppError(400, "You can upload at most 20 images in one batch", "TOO_MANY_FILES");
+  }
+
+  if (options?.classSectionId) {
+    const section = await prisma.classSection.findFirst({
+      where: tenantScope(tenantId, { id: options.classSectionId }),
+      select: { id: true },
+    });
+    if (!section) {
+      throw new AppError(400, "Invalid class section", "INVALID_CLASS_SECTION");
+    }
+  }
+
+  const results: Array<{
+    fileName: string;
+    admissionNumber: string | null;
+    status: "UPDATED" | "NOT_FOUND" | "INVALID_NAME" | "TOO_LARGE" | "FAILED";
+    studentId?: string;
+    studentName?: string;
+    photoUrl?: string;
+    message?: string;
+  }> = [];
+
+  for (const file of files) {
+    const fileName = file.originalname;
+    if (file.size > 500 * 1024) {
+      results.push({
+        fileName,
+        admissionNumber: null,
+        status: "TOO_LARGE",
+        message: "Image exceeds 500KB limit",
+      });
+      continue;
+    }
+
+    const admissionNumber = admissionKeyFromFilename(fileName);
+    if (!admissionNumber) {
+      results.push({
+        fileName,
+        admissionNumber: null,
+        status: "INVALID_NAME",
+        message: "Use JPG/PNG named as admission number (e.g. 133.jpg)",
+      });
+      continue;
+    }
+
+    const student = await prisma.student.findFirst({
+      where: tenantScope(tenantId, {
+        admissionNumber: { equals: admissionNumber, mode: "insensitive" as const },
+        ...(options?.classSectionId
+          ? {
+              enrollments: {
+                some: {
+                  classSectionId: options.classSectionId,
+                  status: EnrollmentStatus.ACTIVE,
+                },
+              },
+            }
+          : {}),
+      }),
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        admissionNumber: true,
+        userId: true,
+      },
+    });
+
+    if (!student) {
+      results.push({
+        fileName,
+        admissionNumber,
+        status: "NOT_FOUND",
+        message: options?.classSectionId
+          ? "No matching student in selected class section"
+          : "No student found with this admission number",
+      });
+      continue;
+    }
+
+    try {
+      const photoUrl = await persistAvatarUpload(file);
+      await prisma.student.update({
+        where: { id: student.id },
+        data: { photoUrl },
+      });
+      if (student.userId) {
+        await prisma.user.update({
+          where: { id: student.userId },
+          data: { avatarUrl: photoUrl },
+        });
+      }
+      results.push({
+        fileName,
+        admissionNumber: student.admissionNumber,
+        status: "UPDATED",
+        studentId: student.id,
+        studentName: `${student.firstName} ${student.lastName ?? ""}`.trim(),
+        photoUrl,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Upload failed";
+      results.push({
+        fileName,
+        admissionNumber: student.admissionNumber,
+        status: "FAILED",
+        studentId: student.id,
+        message,
+      });
+    }
+  }
+
+  return {
+    total: files.length,
+    updated: results.filter((item) => item.status === "UPDATED").length,
+    failed: results.filter((item) => item.status !== "UPDATED").length,
+    results,
+  };
 }
 
 export async function linkSiblings(tenantId: string, studentIds: string[]) {

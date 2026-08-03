@@ -245,7 +245,17 @@ export async function createStudentDocumentController(req: Request, res: Respons
 
 export async function deleteStudentDocumentController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
-  res.json({ data: await deleteStudentDocument(req.auth!.tenantId!, id) });
+  const body = z
+    .object({ reason: z.string().trim().min(3).max(500) })
+    .parse(req.body ?? {});
+  res.json({
+    data: await deleteStudentDocument(
+      req.auth!.tenantId!,
+      id,
+      req.auth!.userId,
+      body.reason,
+    ),
+  });
 }
 
 export async function createConfigurationBackupController(

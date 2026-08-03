@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { NoticeAudience } from "@prisma/client";
 import { persistAvatarUpload } from "../../lib/uploads.js";
+import { AppError } from "../../lib/errors.js";
 import { getPortalOverview } from "./portal.service.js";
 import {
   createPortalLeave,
@@ -14,6 +15,7 @@ import {
   listPortalNotices,
   submitPortalHomework,
   updatePortalStudentProfile,
+  uploadPortalChildDocument,
 } from "./portal-detail.service.js";
 import { createNotice, deleteNotice, listNotices, updateNotice } from "../notices/notices.service.js";
 
@@ -113,6 +115,27 @@ export async function getPortalDocumentsController(req: Request, res: Response) 
       viewer(req),
       req.auth!.productMode,
       studentId,
+    ),
+  });
+}
+
+export async function uploadPortalDocumentController(req: Request, res: Response) {
+  const { studentId } = studentParams.parse(req.params);
+  const file = req.file;
+  if (!file) throw new AppError(400, "Document file is required", "FILE_REQUIRED");
+  const body = z
+    .object({
+      folderId: z.string().min(1),
+      name: z.string().trim().max(200).optional(),
+    })
+    .parse(req.body);
+  res.status(201).json({
+    data: await uploadPortalChildDocument(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      { ...body, file },
     ),
   });
 }

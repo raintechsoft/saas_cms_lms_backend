@@ -16,6 +16,8 @@ import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 import { getExamResults } from "../exams/exams.service.js";
 import { getHomeworkReport } from "../homework/homework.service.js";
+import { FEE_REPORTS } from "./fee-reports.service.js";
+import { STUDENT_REPORTS } from "./student-reports.service.js";
 
 export type ReportModule =
   | "students"
@@ -230,6 +232,8 @@ export async function getReportHub(
     currentSession,
     exams: examOptions,
     coreReports,
+    studentReports: productMode === "LMS" ? [] : STUDENT_REPORTS,
+    feeReports: productMode === "LMS" ? [] : FEE_REPORTS,
     modules: modules.filter(({ key }) => {
       if (productMode === "LMS") return !["finance", "hr"].includes(key);
       if (productMode === "CMS") return !["timetable", "homework"].includes(key);

@@ -60,6 +60,8 @@ import {
 } from "../../modules/academics/academics.controller.js";
 import {
   acceptOnlineAdmissionController,
+  addEnrollmentController,
+  bulkUploadStudentPhotosController,
   createStudentController,
   createStudentMasterController,
   deleteStudentMasterController,
@@ -73,13 +75,21 @@ import {
   listStudentsController,
   rejectOnlineAdmissionController,
   updateStudentController,
-  addEnrollmentController,
   getStudentExamsController,
   getStudentSubjectsController,
   getStudentTimelineController,
   getStudentPortalAccountsController,
   resetStudentPortalPasswordController,
+  listAppDownloadStatusController,
+  getPortalLoginReminderSettingsController,
+  updatePortalLoginReminderSettingsController,
+  sendPortalLoginRemindersController,
+  listStudentDocumentFoldersController,
+  listStudentDocumentsBrowserController,
+  uploadStudentDocumentController,
+  deleteStudentDocumentManagedController,
 } from "../../modules/students/students.controller.js";
+import { avatarUpload, documentUpload } from "../../lib/uploads.js";
 import {
   createCampusNoticeController,
   deleteCampusNoticeController,
@@ -122,8 +132,10 @@ import {
   getFeeSummaryController,
   getFeeInvoiceController,
   getFeePaymentController,
+  listFeeMasterAssignCandidatesController,
   listStudentFeesController,
   listFeeInvoicesController,
+  reorderFeeMastersController,
   revertPaymentController,
   searchPaymentsController,
   setCustomFeeActiveController,
@@ -143,12 +155,15 @@ import {
   createLeaveController,
   getAttendancePointsController,
   getAttendancePointScoresController,
+  getAttendanceReportCatalogController,
   updateAttendancePointConfigController,
   getAttendanceReportController,
   getAttendanceSetupController,
   listLeavesController,
   markAttendanceController,
   reviewLeaveController,
+  runAttendancePackReportController,
+  scanAttendanceController,
 } from "../../modules/attendance/attendance.controller.js";
 import {
   addMarkComponentController,
@@ -225,7 +240,9 @@ import {
 import {
   getReportHubController,
   runCoreReportController,
+  runFeeReportController,
   runModuleReportController,
+  runStudentReportController,
 } from "../../modules/reports/reports.controller.js";
 import {
   createTimetableEntryController,
@@ -600,6 +617,53 @@ campusRouter.post(
   requirePermission("students.manage"),
   asyncHandler(deleteStudentsController),
 );
+campusRouter.post(
+  "/students/photos/bulk",
+  requirePermission("students.manage"),
+  avatarUpload.array("photos", 20),
+  asyncHandler(bulkUploadStudentPhotosController),
+);
+campusRouter.get(
+  "/students/app-download-status",
+  requirePermission("students.view"),
+  asyncHandler(listAppDownloadStatusController),
+);
+campusRouter.get(
+  "/students/app-download-status/reminder-settings",
+  requirePermission("students.view"),
+  asyncHandler(getPortalLoginReminderSettingsController),
+);
+campusRouter.put(
+  "/students/app-download-status/reminder-settings",
+  requirePermission("students.manage"),
+  asyncHandler(updatePortalLoginReminderSettingsController),
+);
+campusRouter.post(
+  "/students/app-download-status/remind",
+  requirePermission("students.manage"),
+  asyncHandler(sendPortalLoginRemindersController),
+);
+campusRouter.get(
+  "/students/document-folders",
+  requirePermission("students.view"),
+  asyncHandler(listStudentDocumentFoldersController),
+);
+campusRouter.get(
+  "/students/documents",
+  requirePermission("students.view"),
+  asyncHandler(listStudentDocumentsBrowserController),
+);
+campusRouter.post(
+  "/students/documents",
+  requirePermission("students.manage"),
+  documentUpload.single("file"),
+  asyncHandler(uploadStudentDocumentController),
+);
+campusRouter.post(
+  "/students/documents/:id/delete",
+  requirePermission("students.manage"),
+  asyncHandler(deleteStudentDocumentManagedController),
+);
 campusRouter.get(
   "/students",
   requirePermission("students.view"),
@@ -750,6 +814,12 @@ campusRouter.post(
   requirePermission("fees.manage"),
   asyncHandler(createFeeMasterController),
 );
+campusRouter.put(
+  "/fees/masters/reorder",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(reorderFeeMastersController),
+);
 campusRouter.post(
   "/fees/custom",
   requireEntitlement("CMS"),
@@ -767,6 +837,12 @@ campusRouter.put(
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(updateFeeMasterController),
+);
+campusRouter.get(
+  "/fees/masters/:id/assign-candidates",
+  requireEntitlement("CMS"),
+  requirePermission("fees.manage"),
+  asyncHandler(listFeeMasterAssignCandidatesController),
 );
 campusRouter.delete(
   "/fees/masters/:id",
@@ -886,6 +962,21 @@ campusRouter.post(
   "/attendance/records",
   requirePermission("attendance.manage"),
   asyncHandler(markAttendanceController),
+);
+campusRouter.post(
+  "/attendance/scan",
+  requirePermission("attendance.manage"),
+  asyncHandler(scanAttendanceController),
+);
+campusRouter.get(
+  "/attendance/reports/catalog",
+  requirePermission("attendance.view"),
+  asyncHandler(getAttendanceReportCatalogController),
+);
+campusRouter.get(
+  "/attendance/reports/run",
+  requirePermission("attendance.view"),
+  asyncHandler(runAttendancePackReportController),
 );
 campusRouter.get(
   "/attendance/reports",
@@ -1302,6 +1393,16 @@ campusRouter.get(
   "/reports/core/:reportKey",
   requirePermission("reports.view"),
   asyncHandler(runCoreReportController),
+);
+campusRouter.get(
+  "/reports/student/:reportKey",
+  requirePermission("reports.view"),
+  asyncHandler(runStudentReportController),
+);
+campusRouter.get(
+  "/reports/fee/:reportKey",
+  requirePermission("reports.view"),
+  asyncHandler(runFeeReportController),
 );
 campusRouter.get(
   "/reports/:module",

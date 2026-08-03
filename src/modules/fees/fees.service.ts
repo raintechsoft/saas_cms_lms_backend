@@ -6,6 +6,7 @@ import {
   FeeInvoiceStatus,
   PaymentStatus,
   Prisma,
+  StudentStatus,
   type PaymentMode,
 } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
@@ -36,6 +37,9 @@ interface FeeMasterInput {
 interface PaymentItemInput {
   assignmentId: string;
   amount: number;
+  /** Optional collect-time overrides (PDF Collect Fees modal). */
+  discountAmount?: number;
+  fineAmount?: number;
 }
 
 interface InvoiceInput {
@@ -180,11 +184,15 @@ export async function getFeeSetup(tenantId: string) {
     await Promise.all([
       prisma.feeType.findMany({
         where: tenantScope(tenantId, {}),
+        include: { _count: { select: { feeMasters: true, groupItems: true } } },
         orderBy: { name: "asc" },
       }),
       prisma.feeGroup.findMany({
         where: tenantScope(tenantId, {}),
-        include: { items: { include: { feeType: true } } },
+        include: {
+          items: { include: { feeType: true } },
+          _count: { select: { feeMasters: true } },
+        },
         orderBy: { name: "asc" },
       }),
       prisma.feeDiscount.findMany({
@@ -212,6 +220,8 @@ export async function getFeeSetup(tenantId: string) {
                       firstName: true,
                       lastName: true,
                       rteEnabled: true,
+                      siblingGroupId: true,
+                      photoUrl: true,
                     },
                   },
                 },
@@ -233,7 +243,7 @@ export async function getFeeSetup(tenantId: string) {
               fineRanges: { orderBy: { startDate: "asc" } },
               _count: { select: { assignments: true } },
             },
-            orderBy: { dueDate: "asc" },
+            orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
           })
         : Promise.resolve([]),
       prisma.tenantFeeSetting.upsert({
@@ -242,10 +252,53 @@ export async function getFeeSetup(tenantId: string) {
         update: {},
       }),
     ]);
+  const groupIds = groups.map((group) => group.id);
+  // FeePaymentItem has no tenantId / feeMaster — scope via payment + assignment.
+  const collectedItems =
+    groupIds.length > 0
+      ? await prisma.feePaymentItem.findMany({
+          where: {
+            payment: { tenantId, status: PaymentStatus.COLLECTED },
+            assignment: { feeMaster: { feeGroupId: { in: groupIds } } },
+          },
+          select: {
+            assignment: { select: { feeMaster: { select: { feeGroupId: true } } } },
+          },
+        })
+      : [];
+
+  const collectedByGroup = new Map<string, number>();
+  for (const item of collectedItems) {
+    const feeGroupId = item.assignment.feeMaster.feeGroupId;
+    collectedByGroup.set(feeGroupId, (collectedByGroup.get(feeGroupId) ?? 0) + 1);
+  }
+
   return {
     currentSession,
-    types,
-    groups,
+    types: types.map((type) => ({
+      ...type,
+      canDelete: type._count.feeMasters === 0 && type._count.groupItems === 0,
+      masterCount: type._count.feeMasters,
+      groupCount: type._count.groupItems,
+    })),
+    groups: groups.map((group) => {
+      const collectedPaymentCount = collectedByGroup.get(group.id) ?? 0;
+      const masterCount = group._count.feeMasters;
+      return {
+        id: group.id,
+        tenantId: group.tenantId,
+        name: group.name,
+        description: group.description,
+        createdAt: group.createdAt,
+        updatedAt: group.updatedAt,
+        items: group.items,
+        masterCount,
+        collectedPaymentCount,
+        // PDF: hide delete after any collected fee for that group.
+        // Also lock when masters exist so structure stays consistent.
+        canDelete: collectedPaymentCount === 0 && masterCount === 0,
+      };
+    }),
     discounts,
     receiptBooks,
     classSections,
@@ -364,14 +417,16 @@ export async function createFeeMaster(tenantId: string, input: FeeMasterInput) {
   if (!session || !group || !type || !classSection || !groupItem) {
     throw new AppError(400, "Fee master references are invalid", "INVALID_FEE_MASTER");
   }
-  if (!input.classSectionId && !input.isCustom) {
-    throw new AppError(400, "A class section is required", "CLASS_SECTION_REQUIRED");
-  }
+  const maxSort = await prisma.feeMaster.aggregate({
+    where: tenantScope(tenantId, { academicSessionId: input.academicSessionId }),
+    _max: { sortOrder: true },
+  });
   const { fineRanges = [], ...masterData } = input;
   return prisma.feeMaster.create({
     data: {
       tenantId,
       ...masterData,
+      sortOrder: (maxSort._max.sortOrder ?? -1) + 1,
       fineRanges: fineRanges.length
         ? {
             create: fineRanges.map((range) => ({
@@ -632,8 +687,25 @@ export async function updateFeeGroup(
 
 export async function deleteFeeGroup(tenantId: string, id: string) {
   const row = await requireFeeGroup(tenantId, id);
+  const collectedPaymentCount = await prisma.feePaymentItem.count({
+    where: {
+      payment: { tenantId, status: PaymentStatus.COLLECTED },
+      assignment: { feeMaster: { feeGroupId: id } },
+    },
+  });
+  if (collectedPaymentCount > 0) {
+    throw new AppError(
+      409,
+      "Cannot delete this fees class group because student fees have already been collected for it",
+      "FEE_GROUP_HAS_COLLECTIONS",
+    );
+  }
   if (row._count.feeMasters > 0) {
-    throw new AppError(409, "Fee group is used by fee masters", "FEE_GROUP_IN_USE");
+    throw new AppError(
+      409,
+      "Cannot delete this fees class group while fee master entries still use it",
+      "FEE_GROUP_IN_USE",
+    );
   }
   await prisma.feeGroup.delete({ where: { id } });
 }
@@ -774,9 +846,6 @@ export async function updateFeeMaster(
   if (!session || !group || !type || !classSection || !groupItem) {
     throw new AppError(400, "Fee master references are invalid", "INVALID_FEE_MASTER");
   }
-  if (!next.classSectionId && !next.isCustom) {
-    throw new AppError(400, "A class section is required", "CLASS_SECTION_REQUIRED");
-  }
 
   const { fineRanges, ...masterData } = next;
   return prisma.$transaction(async (tx) => {
@@ -840,33 +909,199 @@ export async function assignFeeMaster(
     where: tenantScope(tenantId, { id: masterId }),
   });
   if (!master) throw new AppError(404, "Fee master not found", "FEE_MASTER_NOT_FOUND");
+
+  const selectedIds = enrollmentIds !== undefined ? [...new Set(enrollmentIds)] : null;
+
+  const enrollments =
+    selectedIds && selectedIds.length === 0
+      ? []
+      : await prisma.studentEnrollment.findMany({
+          where: tenantScope(tenantId, {
+            academicSessionId: master.academicSessionId,
+            status: EnrollmentStatus.ACTIVE,
+            student: { status: StudentStatus.ACTIVE },
+            ...(selectedIds?.length
+              ? { id: { in: selectedIds } }
+              : master.classSectionId
+                ? { classSectionId: master.classSectionId }
+                : {}),
+          }),
+          select: { id: true },
+        });
+  if (selectedIds && selectedIds.length > 0 && enrollments.length !== selectedIds.length) {
+    throw new AppError(
+      400,
+      "One or more students cannot be assigned (disabled or invalid)",
+      "INVALID_ENROLLMENT",
+    );
+  }
+  if (!selectedIds && !enrollments.length) {
+    throw new AppError(400, "No eligible students found", "NO_ELIGIBLE_STUDENTS");
+  }
+
+  // Block assigning students who already have collections on this master.
+  if (selectedIds?.length) {
+    const blocked = await prisma.studentFeeAssignment.findMany({
+      where: tenantScope(tenantId, {
+        feeMasterId: masterId,
+        studentEnrollmentId: { in: selectedIds },
+        paymentItems: { some: { payment: { status: PaymentStatus.COLLECTED } } },
+      }),
+      select: { id: true },
+    });
+    if (blocked.length) {
+      throw new AppError(
+        409,
+        "Cannot change assignment for students with collected fees — revert payment first",
+        "FEE_ALREADY_COLLECTED",
+      );
+    }
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    if (selectedIds) {
+      // Remove unpaid assignments that were unchecked (PDF: change group only if not collected).
+      await tx.studentFeeAssignment.deleteMany({
+        where: tenantScope(tenantId, {
+          feeMasterId: masterId,
+          studentEnrollmentId: { notIn: selectedIds },
+          paymentItems: { none: {} },
+        }),
+      });
+    }
+    if (!enrollments.length) {
+      return { count: 0 };
+    }
+    const created = await tx.studentFeeAssignment.createMany({
+      data: enrollments.map(({ id }) => ({
+        tenantId,
+        studentEnrollmentId: id,
+        feeMasterId: master.id,
+      })),
+      skipDuplicates: true,
+    });
+    return created;
+  });
+
+  return { assigned: result.count, eligible: enrollments.length };
+}
+
+export async function listFeeMasterAssignCandidates(tenantId: string, masterId: string) {
+  const master = await prisma.feeMaster.findFirst({
+    where: tenantScope(tenantId, { id: masterId }),
+    include: {
+      feeType: true,
+      feeGroup: true,
+      classSection: { include: { academicClass: true, section: true } },
+    },
+  });
+  if (!master) throw new AppError(404, "Fee master not found", "FEE_MASTER_NOT_FOUND");
+
   const enrollments = await prisma.studentEnrollment.findMany({
     where: tenantScope(tenantId, {
       academicSessionId: master.academicSessionId,
-      status: EnrollmentStatus.ACTIVE,
-      ...(enrollmentIds?.length
-        ? { id: { in: enrollmentIds } }
-        : master.classSectionId
-          ? { classSectionId: master.classSectionId }
-          : { id: { in: [] } }),
+      ...(master.classSectionId ? { classSectionId: master.classSectionId } : {}),
     }),
-    select: { id: true },
+    include: {
+      student: {
+        select: {
+          id: true,
+          admissionNumber: true,
+          firstName: true,
+          lastName: true,
+          status: true,
+        },
+      },
+      classSection: { include: { academicClass: true, section: true } },
+      feeAssignments: {
+        where: { feeMasterId: masterId },
+        include: {
+          paymentItems: {
+            where: { payment: { status: PaymentStatus.COLLECTED } },
+            select: { id: true },
+            take: 1,
+          },
+        },
+      },
+    },
+    orderBy: [
+      { student: { firstName: "asc" } },
+      { student: { lastName: "asc" } },
+    ],
   });
-  if (enrollmentIds && enrollments.length !== new Set(enrollmentIds).size) {
-    throw new AppError(400, "One or more enrolments are invalid", "INVALID_ENROLLMENT");
-  }
-  if (!enrollments.length) {
-    throw new AppError(400, "No eligible students found", "NO_ELIGIBLE_STUDENTS");
-  }
-  const result = await prisma.studentFeeAssignment.createMany({
-    data: enrollments.map(({ id }) => ({
-      tenantId,
-      studentEnrollmentId: id,
-      feeMasterId: master.id,
-    })),
-    skipDuplicates: true,
+
+  const students = enrollments.map((enrollment) => {
+    const assignment = enrollment.feeAssignments[0];
+    const collected = Boolean(assignment?.paymentItems.length);
+    const studentDisabled = enrollment.student.status !== "ACTIVE";
+    const enrollmentDisabled = enrollment.status !== EnrollmentStatus.ACTIVE;
+    const disabled = studentDisabled || enrollmentDisabled;
+    const assigned = Boolean(assignment);
+    // PDF: no checkbox when fees already collected or student is disabled.
+    const canSelect = !collected && !disabled;
+    return {
+      enrollmentId: enrollment.id,
+      student: enrollment.student,
+      classSection: enrollment.classSection,
+      assigned,
+      assignmentId: assignment?.id ?? null,
+      collected,
+      disabled,
+      canSelect,
+      selected: assigned && canSelect,
+      lockReason: collected
+        ? ("COLLECTED" as const)
+        : disabled
+          ? ("DISABLED" as const)
+          : null,
+    };
   });
-  return { assigned: result.count, eligible: enrollments.length };
+
+  return {
+    master: {
+      id: master.id,
+      amount: master.amount,
+      dueDate: master.dueDate,
+      feeType: master.feeType,
+      feeGroup: master.feeGroup,
+      classSection: master.classSection,
+    },
+    students,
+    summary: {
+      total: students.length,
+      selectable: students.filter((s) => s.canSelect).length,
+      assigned: students.filter((s) => s.assigned).length,
+      collected: students.filter((s) => s.collected).length,
+      disabled: students.filter((s) => s.disabled).length,
+    },
+  };
+}
+
+export async function reorderFeeMasters(tenantId: string, orderedIds: string[]) {
+  const uniqueIds = [...new Set(orderedIds)];
+  if (!uniqueIds.length || uniqueIds.length !== orderedIds.length) {
+    throw new AppError(400, "Provide a unique ordered list of fee masters", "INVALID_REORDER");
+  }
+  const masters = await prisma.feeMaster.findMany({
+    where: tenantScope(tenantId, { id: { in: uniqueIds } }),
+    select: { id: true, academicSessionId: true },
+  });
+  if (masters.length !== uniqueIds.length) {
+    throw new AppError(404, "One or more fee masters were not found", "FEE_MASTER_NOT_FOUND");
+  }
+  const sessionIds = new Set(masters.map((m) => m.academicSessionId));
+  if (sessionIds.size !== 1) {
+    throw new AppError(400, "All fee masters must belong to the same session", "INVALID_REORDER");
+  }
+  await prisma.$transaction(
+    uniqueIds.map((id, index) =>
+      prisma.feeMaster.update({
+        where: { id },
+        data: { sortOrder: index },
+      }),
+    ),
+  );
+  return { reordered: uniqueIds.length };
 }
 
 export async function updateAssignmentDiscount(
@@ -1143,7 +1378,17 @@ export async function listStudentFees(
 ) {
   const student = await prisma.student.findFirst({
     where: tenantScope(tenantId, { id: studentId }),
-    include: {
+    select: {
+      id: true,
+      admissionNumber: true,
+      firstName: true,
+      lastName: true,
+      photoUrl: true,
+      rteEnabled: true,
+      siblingGroupId: true,
+      guardianPhone: true,
+      fatherPhone: true,
+      motherPhone: true,
       enrollments: {
         where: sessionId ? { academicSessionId: sessionId } : { academicSession: { isCurrent: true } },
         include: {
@@ -1157,15 +1402,21 @@ export async function listStudentFees(
     },
   });
   if (!student) throw new AppError(404, "Student not found", "STUDENT_NOT_FOUND");
-  const assignments = student.enrollments.flatMap((enrollment) =>
-    enrollment.feeAssignments.map((assignment) => ({
-      ...toDue(assignment, asOf),
-      enrollment: {
-        id: enrollment.id,
-        classSection: enrollment.classSection,
-      },
-    })),
-  );
+  const assignments = student.enrollments
+    .flatMap((enrollment) =>
+      enrollment.feeAssignments.map((assignment) => ({
+        ...toDue(assignment, asOf),
+        enrollment: {
+          id: enrollment.id,
+          classSection: enrollment.classSection,
+        },
+      })),
+    )
+    .sort((a, b) => {
+      const order = (a.feeMaster.sortOrder ?? 0) - (b.feeMaster.sortOrder ?? 0);
+      if (order !== 0) return order;
+      return new Date(a.feeMaster.dueDate).getTime() - new Date(b.feeMaster.dueDate).getTime();
+    });
   const totals = assignments.reduce(
     (sum, item) => ({
       base: sum.base + item.totals.base,
@@ -1281,8 +1532,9 @@ export async function collectPayment(
             create: calculated.map(({ item, due }) => ({
               assignmentId: item.assignmentId,
               baseAmount: due.totals.base,
-              discountAmount: due.totals.discount,
-              fineAmount: due.totals.fine,
+              discountAmount:
+                item.discountAmount !== undefined ? item.discountAmount : due.totals.discount,
+              fineAmount: item.fineAmount !== undefined ? item.fineAmount : due.totals.fine,
               paidAmount: item.amount,
             })),
           },

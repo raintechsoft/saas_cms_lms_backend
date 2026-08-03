@@ -7,8 +7,32 @@ import { AppError } from "./errors.js";
 
 export const UPLOAD_ROOT = path.resolve(process.cwd(), "uploads");
 export const AVATAR_DIR = path.join(UPLOAD_ROOT, "avatars");
+export const DOCUMENT_DIR = path.join(UPLOAD_ROOT, "student-documents");
 
 const ALLOWED_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+const DOCUMENT_EXT = new Set([
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".gif",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+]);
+const DOCUMENT_MIME = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
 
 function createS3Client() {
   if (env.STORAGE_DRIVER !== "s3") return null;
@@ -36,6 +60,7 @@ export function getStorageDriver() {
 export async function ensureLocalUploadDirs() {
   if (env.STORAGE_DRIVER !== "local") return;
   await fs.mkdir(AVATAR_DIR, { recursive: true });
+  await fs.mkdir(DOCUMENT_DIR, { recursive: true });
 }
 
 function buildAvatarFilename(originalName: string) {
@@ -75,6 +100,68 @@ export const avatarUpload = multer({
     cb(null, true);
   },
 });
+
+/** Multer middleware for student documents (images + PDF/Office, max 10MB). */
+export const documentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!DOCUMENT_MIME.has(file.mimetype) && !DOCUMENT_EXT.has(ext)) {
+      cb(new Error("Only image, PDF, or Office document files are allowed"));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+function buildDocumentFilename(originalName: string) {
+  const ext = path.extname(originalName).toLowerCase() || ".bin";
+  const safeExt = DOCUMENT_EXT.has(ext) ? ext : ".bin";
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}${safeExt}`;
+}
+
+function publicLocalDocumentPath(filename: string) {
+  return `/uploads/student-documents/${filename}`;
+}
+
+/** Persist an uploaded student document and return the public URL. */
+export async function persistDocumentUpload(file: Express.Multer.File) {
+  if (!file.buffer?.length) {
+    throw new AppError(400, "Document file is required", "FILE_REQUIRED");
+  }
+
+  const filename = buildDocumentFilename(file.originalname);
+  const key = `student-documents/${filename}`;
+
+  if (env.STORAGE_DRIVER === "s3") {
+    if (!s3 || !env.S3_BUCKET) {
+      throw new AppError(503, "S3 storage is not configured", "STORAGE_NOT_CONFIGURED");
+    }
+
+    try {
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: env.S3_BUCKET,
+          Key: key,
+          Body: file.buffer,
+          ContentType: file.mimetype || "application/octet-stream",
+          CacheControl: "public, max-age=31536000, immutable",
+        }),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "S3 upload failed";
+      console.error(`[storage] S3 document upload failed: ${message}`);
+      throw new AppError(502, "Failed to upload file to storage", "STORAGE_UPLOAD_FAILED");
+    }
+
+    return publicS3Url(key);
+  }
+
+  await ensureLocalUploadDirs();
+  await fs.writeFile(path.join(DOCUMENT_DIR, filename), file.buffer);
+  return publicLocalDocumentPath(filename);
+}
 
 /** Persist an uploaded avatar and return the public URL stored on the user record. */
 export async function persistAvatarUpload(file: Express.Multer.File) {

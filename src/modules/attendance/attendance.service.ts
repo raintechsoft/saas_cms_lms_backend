@@ -3,7 +3,7 @@ import {
   AttendanceType,
   EnrollmentStatus,
   LeaveStatus,
-  type Prisma,
+  Weekday,
 } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
@@ -15,6 +15,39 @@ interface MarkAttendanceItem {
   inTime?: string | null;
   outTime?: string | null;
   note?: string | null;
+}
+
+const WEEKDAY_FROM_UTC_DAY: Weekday[] = [
+  Weekday.SUNDAY,
+  Weekday.MONDAY,
+  Weekday.TUESDAY,
+  Weekday.WEDNESDAY,
+  Weekday.THURSDAY,
+  Weekday.FRIDAY,
+  Weekday.SATURDAY,
+];
+
+export function weekdayFromUtcDate(date: Date): Weekday {
+  return WEEKDAY_FROM_UTC_DAY[date.getUTCDay()]!;
+}
+
+export function isSundayUtc(date: Date): boolean {
+  return date.getUTCDay() === 0;
+}
+
+export function parseMonthBounds(month: string): { start: Date; end: Date } {
+  const match = /^(\d{4})-(\d{2})$/.exec(month.trim());
+  if (!match) {
+    throw new AppError(400, "Month must be YYYY-MM", "INVALID_MONTH");
+  }
+  const year = Number(match[1]);
+  const monthIndex = Number(match[2]) - 1;
+  if (monthIndex < 0 || monthIndex > 11) {
+    throw new AppError(400, "Month must be YYYY-MM", "INVALID_MONTH");
+  }
+  const start = new Date(Date.UTC(year, monthIndex, 1));
+  const end = new Date(Date.UTC(year, monthIndex + 1, 0));
+  return { start, end };
 }
 
 export async function getAttendanceSetup(
@@ -34,7 +67,19 @@ export async function getAttendanceSetup(
   const classSections = currentSession
     ? await prisma.classSection.findMany({
         where: tenantScope(tenantId, { academicSessionId: currentSession.id }),
-        include: { academicClass: true, section: true },
+        include: {
+          academicClass: {
+            select: {
+              id: true,
+              name: true,
+              inTime: true,
+              halfDayTime: true,
+              outTime: true,
+              sortOrder: true,
+            },
+          },
+          section: true,
+        },
         orderBy: [
           { academicClass: { sortOrder: "asc" } },
           { section: { name: "asc" } },
@@ -42,15 +87,69 @@ export async function getAttendanceSetup(
       })
     : [];
 
+  const periodKey =
+    setting.attendanceType === AttendanceType.PERIOD_WISE
+      ? query.periodKey?.trim() || "PERIOD-1"
+      : "DAY";
+
+  let alreadySubmitted = false;
+  let periods: Array<{ key: string; label: string; startTime: string; endTime: string }> = [];
+  let classTimes: {
+    id: string;
+    name: string;
+    inTime: string | null;
+    halfDayTime: string | null;
+    outTime: string | null;
+  } | null = null;
   let roster: unknown[] = [];
+
   if (query.classSectionId && currentSession) {
     const classSection = classSections.find(({ id }) => id === query.classSectionId);
     if (!classSection) {
       throw new AppError(400, "Class section is invalid", "INVALID_CLASS_SECTION");
     }
-    const periodKey = setting.attendanceType === AttendanceType.PERIOD_WISE
-      ? query.periodKey?.trim() || "PERIOD-1"
-      : "DAY";
+    classTimes = {
+      id: classSection.academicClass.id,
+      name: classSection.academicClass.name,
+      inTime: classSection.academicClass.inTime,
+      halfDayTime: classSection.academicClass.halfDayTime,
+      outTime: classSection.academicClass.outTime,
+    };
+
+    const existingCount = await prisma.attendanceRecord.count({
+      where: tenantScope(tenantId, {
+        classSectionId: query.classSectionId,
+        attendanceDate: query.date,
+        periodKey,
+      }),
+    });
+    alreadySubmitted = existingCount > 0;
+
+    if (setting.attendanceType === AttendanceType.PERIOD_WISE) {
+      const weekday = weekdayFromUtcDate(query.date);
+      const entries = await prisma.timetableEntry.findMany({
+        where: tenantScope(tenantId, {
+          classSectionId: query.classSectionId,
+          weekday,
+          academicSessionId: currentSession.id,
+        }),
+        include: {
+          classSubject: { include: { subject: { select: { name: true } } } },
+        },
+        orderBy: { startTime: "asc" },
+      });
+      periods = entries.map((entry) => {
+        const subjectName = entry.classSubject.subject?.name;
+        const timeRange = `${entry.startTime}–${entry.endTime}`;
+        return {
+          key: `P-${entry.startTime}`,
+          label: subjectName ? `${timeRange} · ${subjectName}` : timeRange,
+          startTime: entry.startTime,
+          endTime: entry.endTime,
+        };
+      });
+    }
+
     roster = await prisma.studentEnrollment.findMany({
       where: tenantScope(tenantId, {
         classSectionId: query.classSectionId,
@@ -73,6 +172,39 @@ export async function getAttendanceSetup(
     });
   }
 
+  let isHolidayDate = isSundayUtc(query.date);
+  let holidayTitle: string | null = isHolidayDate ? "Sunday" : null;
+  if (!isHolidayDate && currentSession) {
+    const holiday = await prisma.holiday.findFirst({
+      where: tenantScope(tenantId, {
+        startDate: { lte: query.date },
+        endDate: { gte: query.date },
+        OR: [
+          { academicSessionId: currentSession.id },
+          { academicSessionId: null },
+        ],
+      }),
+      orderBy: { startDate: "asc" },
+    });
+    if (holiday) {
+      isHolidayDate = true;
+      holidayTitle = holiday.title;
+    }
+  } else if (!isHolidayDate) {
+    const holiday = await prisma.holiday.findFirst({
+      where: tenantScope(tenantId, {
+        startDate: { lte: query.date },
+        endDate: { gte: query.date },
+        academicSessionId: null,
+      }),
+      orderBy: { startDate: "asc" },
+    });
+    if (holiday) {
+      isHolidayDate = true;
+      holidayTitle = holiday.title;
+    }
+  }
+
   const pendingLeaves = await prisma.studentLeave.findMany({
     where: tenantScope(tenantId, { status: LeaveStatus.PENDING }),
     include: {
@@ -90,6 +222,11 @@ export async function getAttendanceSetup(
     attendanceType: setting.attendanceType,
     currentSession,
     classSections,
+    classTimes,
+    periods,
+    alreadySubmitted,
+    isHolidayDate,
+    holidayTitle,
     roster,
     pendingLeaves,
   };
@@ -147,6 +284,15 @@ export async function markAttendance(
     throw new AppError(400, "One or more students are invalid", "INVALID_ENROLLMENT");
   }
 
+  const existingCount = await prisma.attendanceRecord.count({
+    where: tenantScope(tenantId, {
+      classSectionId: classSection.id,
+      attendanceDate: input.attendanceDate,
+      periodKey,
+    }),
+  });
+  const mode = existingCount > 0 ? ("update" as const) : ("create" as const);
+
   await prisma.$transaction(
     input.records.map((record) =>
       prisma.attendanceRecord.upsert({
@@ -181,7 +327,7 @@ export async function markAttendance(
       }),
     ),
   );
-  return { marked: input.records.length, periodKey };
+  return { marked: input.records.length, periodKey, mode };
 }
 
 export async function getAttendanceReport(
@@ -265,6 +411,7 @@ export async function createLeave(
     toDate: Date;
     reason: string;
     status?: LeaveStatus;
+    attachmentUrl?: string | null;
   },
 ) {
   if (input.toDate < input.fromDate) {
@@ -289,6 +436,7 @@ export async function createLeave(
       fromDate: input.fromDate,
       toDate: input.toDate,
       reason: input.reason,
+      attachmentUrl: input.attachmentUrl ?? null,
       status,
       ...reviewed,
     },
@@ -390,7 +538,11 @@ export async function getAttendancePoints(
   }));
 }
 
-export async function getAttendancePointScores(tenantId: string, sessionId?: string) {
+export async function getAttendancePointScores(
+  tenantId: string,
+  sessionId?: string,
+  month?: string,
+) {
   await prisma.tenantSetting.upsert({
     where: { tenantId },
     create: { tenantId },
@@ -418,6 +570,8 @@ export async function getAttendancePointScores(tenantId: string, sessionId?: str
   const halfPts = Number(settingRows[0]?.attendance_half_day_points ?? 1);
   const latePts = Number(settingRows[0]?.attendance_late_points ?? -1);
 
+  const monthFilter = month ? parseMonthBounds(month) : null;
+
   const [enrollments, records] = await Promise.all([
     prisma.studentEnrollment.findMany({
       where: tenantScope(tenantId, {
@@ -435,7 +589,12 @@ export async function getAttendancePointScores(tenantId: string, sessionId?: str
       ],
     }),
     prisma.attendanceRecord.findMany({
-      where: tenantScope(tenantId, { academicSessionId: session.id }),
+      where: tenantScope(tenantId, {
+        academicSessionId: session.id,
+        ...(monthFilter
+          ? { attendanceDate: { gte: monthFilter.start, lte: monthFilter.end } }
+          : {}),
+      }),
       select: { studentEnrollmentId: true, status: true },
     }),
   ]);
@@ -492,6 +651,7 @@ export async function getAttendancePointScores(tenantId: string, sessionId?: str
 
   return {
     session,
+    month: month ?? null,
     config: {
       presentPoints: presentPts,
       halfDayPoints: halfPts,

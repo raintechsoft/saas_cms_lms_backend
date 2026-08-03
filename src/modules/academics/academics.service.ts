@@ -142,7 +142,14 @@ export async function setCurrentSession(tenantId: string, sessionId: string) {
 
 export async function createClass(
   tenantId: string,
-  input: { name: string; code?: string | null; sortOrder?: number },
+  input: {
+    name: string;
+    code?: string | null;
+    sortOrder?: number;
+    inTime?: string | null;
+    halfDayTime?: string | null;
+    outTime?: string | null;
+  },
 ) {
   const existing = await prisma.academicClass.findFirst({
     where: tenantScope(tenantId, { name: input.name.trim() }),
@@ -150,16 +157,43 @@ export async function createClass(
   if (existing) {
     throw new AppError(409, `Class "${input.name.trim()}" already exists`, "CLASS_EXISTS");
   }
-  return prisma.academicClass.create({ data: { tenantId, ...input } });
+  return prisma.academicClass.create({
+    data: {
+      tenantId,
+      name: input.name.trim(),
+      code: input.code,
+      sortOrder: input.sortOrder,
+      inTime: input.inTime?.trim() || null,
+      halfDayTime: input.halfDayTime?.trim() || null,
+      outTime: input.outTime?.trim() || null,
+    },
+  });
 }
 
 export async function updateClass(
   tenantId: string,
   id: string,
-  input: { name?: string; code?: string | null; sortOrder?: number },
+  input: {
+    name?: string;
+    code?: string | null;
+    sortOrder?: number;
+    inTime?: string | null;
+    halfDayTime?: string | null;
+    outTime?: string | null;
+  },
 ) {
   await requireRecord("academicClass", tenantId, id, "Class");
-  return prisma.academicClass.update({ where: { id }, data: input });
+  return prisma.academicClass.update({
+    where: { id },
+    data: {
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.code !== undefined ? { code: input.code } : {}),
+      ...(input.sortOrder !== undefined ? { sortOrder: input.sortOrder } : {}),
+      ...(input.inTime !== undefined ? { inTime: input.inTime?.trim() || null } : {}),
+      ...(input.halfDayTime !== undefined ? { halfDayTime: input.halfDayTime?.trim() || null } : {}),
+      ...(input.outTime !== undefined ? { outTime: input.outTime?.trim() || null } : {}),
+    },
+  });
 }
 
 export async function createSection(tenantId: string, input: { name: string }) {
@@ -670,7 +704,7 @@ export async function promoteStudents(
     items: Array<{
       studentEnrollmentId: string;
       result: "PASS" | "FAIL";
-      action: "CONTINUE" | "LEAVE";
+      action: "CONTINUE" | "LEAVE" | "SKIP";
     }>;
   },
 ) {
@@ -727,9 +761,15 @@ export async function promoteStudents(
 
     let promotedCount = 0;
     let alumniCount = 0;
+    let skippedCount = 0;
     const errors: string[] = [];
 
     for (const item of input.items) {
+      if (item.action === "SKIP") {
+        skippedCount += 1;
+        continue;
+      }
+
       const enrollment = await tx.studentEnrollment.findFirst({
         where: tenantScope(tenantId, { id: item.studentEnrollmentId, classSectionId: input.fromClassSectionId }),
         select: { id: true, studentId: true, classSectionId: true },
@@ -819,6 +859,7 @@ export async function promoteStudents(
       total: input.items.length,
       promoted: promotedCount,
       alumni: alumniCount,
+      skipped: skippedCount,
     };
   });
 }

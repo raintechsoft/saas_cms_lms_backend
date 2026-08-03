@@ -125,7 +125,7 @@ export async function getPortalChildDocuments(
   await assertAccessibleStudent(tenantId, viewer, studentId);
   const [documents, generated] = await Promise.all([
     prisma.studentDocument.findMany({
-      where: tenantScope(tenantId, { studentId }),
+      where: tenantScope(tenantId, { studentId, deletedAt: null }),
       include: { folder: true },
       orderBy: { createdAt: "desc" },
       take: 100,
@@ -143,6 +143,7 @@ export async function getPortalChildDocuments(
       name: doc.name,
       fileUrl: doc.fileUrl,
       folder: doc.folder.name,
+      folderId: doc.folder.id,
       createdAt: doc.createdAt,
     })),
     certificates: generated.map((doc) => ({
@@ -151,7 +152,34 @@ export async function getPortalChildDocuments(
       createdAt: doc.generatedAt,
       serialNumber: doc.serialNumber,
     })),
+    folders: await prisma.studentDocumentFolder.findMany({
+      where: tenantScope(tenantId, {}),
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
   };
+}
+
+export async function uploadPortalChildDocument(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+  input: {
+    folderId: string;
+    name?: string;
+    file: Express.Multer.File;
+  },
+) {
+  assertProductMode(productMode, "CMS");
+  await assertAccessibleStudent(tenantId, viewer, studentId);
+  const { uploadStudentDocumentFile } = await import("../students/student-documents.service.js");
+  return uploadStudentDocumentFile(tenantId, viewer.userId, {
+    studentId,
+    folderId: input.folderId,
+    name: input.name,
+    file: input.file,
+  });
 }
 
 export async function getPortalChildTimetable(

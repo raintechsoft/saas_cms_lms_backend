@@ -4,7 +4,7 @@ import {
   authenticate,
   requireTenant,
 } from "../../middleware/auth.middleware.js";
-import { avatarUpload } from "../../lib/uploads.js";
+import { avatarUpload, documentUpload } from "../../lib/uploads.js";
 import {
   createPortalLeaveController,
   getPortalAttendanceController,
@@ -17,6 +17,7 @@ import {
   listPortalNoticesController,
   submitPortalHomeworkController,
   updatePortalStudentProfileController,
+  uploadPortalDocumentController,
   uploadPortalStudentPhotoController,
 } from "../../modules/portal/portal.controller.js";
 import {
@@ -40,6 +41,11 @@ portalRouter.get("/children/:studentId/leaves", asyncHandler(getPortalLeavesCont
 portalRouter.post("/children/:studentId/leaves", asyncHandler(createPortalLeaveController));
 portalRouter.get("/children/:studentId/fees", asyncHandler(getPortalFeesController));
 portalRouter.get("/children/:studentId/documents", asyncHandler(getPortalDocumentsController));
+portalRouter.post(
+  "/children/:studentId/documents",
+  documentUpload.single("file"),
+  asyncHandler(uploadPortalDocumentController),
+);
 portalRouter.get("/children/:studentId/timetable", asyncHandler(getPortalTimetableController));
 portalRouter.get("/children/:studentId/homework", asyncHandler(getPortalHomeworkController));
 portalRouter.put(
