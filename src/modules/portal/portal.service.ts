@@ -18,6 +18,53 @@ import {
 } from "./portal-access.js";
 import { listPortalNotices } from "./portal-detail.service.js";
 
+function mapStudentProfile(student: AccessibleStudent) {
+  return {
+    id: student.id,
+    admissionNumber: student.admissionNumber,
+    firstName: student.firstName,
+    lastName: student.lastName,
+    photoUrl: student.photoUrl,
+    status: student.status,
+    mobile: student.mobile,
+    email: student.email,
+    currentAddress: student.currentAddress,
+    permanentAddress: student.permanentAddress,
+    gender: student.gender,
+    dateOfBirth: student.dateOfBirth
+      ? new Date(student.dateOfBirth).toISOString()
+      : null,
+    admissionDate: student.admissionDate
+      ? new Date(student.admissionDate).toISOString()
+      : null,
+    bloodGroup: student.bloodGroup,
+    nationality: student.nationality,
+    religion: student.religion,
+    caste: student.caste,
+    category: student.category?.name ?? null,
+    house: student.house?.name ?? null,
+    fatherName: student.fatherName,
+    fatherPhone: student.fatherPhone,
+    fatherEmail: student.fatherEmail,
+    fatherOccupation: student.fatherOccupation,
+    motherName: student.motherName,
+    motherPhone: student.motherPhone,
+    motherEmail: student.motherEmail,
+    motherOccupation: student.motherOccupation,
+    guardianName: student.guardianName,
+    guardianRelation: student.guardianRelation,
+    guardianPhone: student.guardianPhone,
+    guardianEmail: student.guardianEmail,
+    guardianOccupation: student.guardianOccupation,
+    admissionType: student.admissionType,
+    transportOptIn: student.transportOptIn,
+    transportRoute: student.transportRoute,
+    hostelOptIn: student.hostelOptIn,
+    hostelRoom: student.hostelRoom,
+    additionalNotes: student.additionalNotes,
+  };
+}
+
 async function buildStudentSnapshot(
   tenantId: string,
   student: AccessibleStudent,
@@ -30,17 +77,7 @@ async function buildStudentSnapshot(
   const includeHomework = Boolean(productMode);
   if (!enrollment) {
     return {
-      student: {
-        id: student.id,
-        admissionNumber: student.admissionNumber,
-        firstName: student.firstName,
-        lastName: student.lastName,
-        photoUrl: student.photoUrl,
-        status: student.status,
-        mobile: student.mobile,
-        email: student.email,
-        currentAddress: student.currentAddress,
-      },
+      student: mapStudentProfile(student),
       relation: meta.relation,
       isPrimary: meta.isPrimary,
       enrollment: null,
@@ -144,10 +181,25 @@ async function buildStudentSnapshot(
         mark.isAbsent ||
         Number(mark.marksObtained) < Number(mark.schedule.minimumMarks),
     );
+    const dates = examStudent.marks
+      .map((mark) => new Date(mark.schedule.examDate).getTime())
+      .filter((value) => Number.isFinite(value));
+    const examDate =
+      dates.length > 0
+        ? new Date(Math.max(...dates)).toISOString()
+        : examStudent.exam.startDate
+          ? new Date(examStudent.exam.startDate).toISOString()
+          : examStudent.exam.publishedAt
+            ? new Date(examStudent.exam.publishedAt).toISOString()
+            : null;
     return {
       examId: examStudent.examId,
       examName: examStudent.exam.name,
       groupName: examStudent.exam.examGroup.name,
+      examDate,
+      publishedAt: examStudent.exam.publishedAt
+        ? new Date(examStudent.exam.publishedAt).toISOString()
+        : null,
       maximumMarks,
       obtainedMarks,
       percentage: maximumMarks
@@ -159,24 +211,15 @@ async function buildStudentSnapshot(
         marksObtained: Number(mark.marksObtained),
         maximumMarks: Number(mark.schedule.maximumMarks),
         isAbsent: mark.isAbsent,
+        examDate: mark.schedule.examDate
+          ? new Date(mark.schedule.examDate).toISOString()
+          : null,
       })),
     };
   });
 
   return {
-    student: {
-      id: student.id,
-      admissionNumber: student.admissionNumber,
-      firstName: student.firstName,
-      lastName: student.lastName,
-      photoUrl: student.photoUrl,
-      status: student.status,
-      mobile: student.mobile,
-      email: student.email,
-      currentAddress: student.currentAddress,
-      category: student.category?.name ?? null,
-      house: student.house?.name ?? null,
-    },
+    student: mapStudentProfile(student),
     relation: meta.relation,
     isPrimary: meta.isPrimary,
     enrollment: {

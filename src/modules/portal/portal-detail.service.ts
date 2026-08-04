@@ -30,23 +30,56 @@ export async function getPortalChildAttendance(
   const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
   const enrollment = currentEnrollment(student);
   if (!enrollment) return { summary: null, records: [] };
-  const fromDate = from ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const toDate = to ?? new Date();
+
+  // Default to current academic session window when available, else last 12 months.
+  const session = enrollment.academicSession;
+  const fromDate =
+    from ??
+    (session?.startDate
+      ? new Date(session.startDate)
+      : new Date(Date.now() - 365 * 24 * 60 * 60 * 1000));
+  const toDate = to ?? (session?.endDate ? new Date(session.endDate) : new Date());
+
   const records = await prisma.attendanceRecord.findMany({
     where: tenantScope(tenantId, {
       studentEnrollmentId: enrollment.id,
       attendanceDate: { gte: fromDate, lte: toDate },
     }),
     orderBy: { attendanceDate: "desc" },
-    take: 120,
+    take: 400,
   });
+
+  const counts = records.reduce(
+    (acc, record) => {
+      acc.total += 1;
+      if (record.status === "PRESENT") acc.present += 1;
+      if (record.status === "LATE") acc.late += 1;
+      if (record.status === "ABSENT") acc.absent += 1;
+      if (record.status === "HALF_DAY") acc.halfDay += 1;
+      if (record.status === "HOLIDAY") acc.holiday += 1;
+      return acc;
+    },
+    { total: 0, present: 0, late: 0, absent: 0, halfDay: 0, holiday: 0 },
+  );
+  const counted = counts.total - counts.holiday;
+  const attended = counts.present + counts.late + counts.halfDay * 0.5;
+  const percentage = counted ? Number(((attended / counted) * 100).toFixed(1)) : 0;
+
   return {
     enrollmentId: enrollment.id,
+    period: {
+      from: fromDate,
+      to: toDate,
+      label: session?.name ?? null,
+    },
+    summary: { ...counts, percentage },
     records: records.map((record) => ({
       id: record.id,
       date: record.attendanceDate,
       status: record.status,
       periodKey: record.periodKey,
+      inTime: record.inTime,
+      outTime: record.outTime,
       note: record.note,
     })),
   };
@@ -95,25 +128,60 @@ export async function getPortalChildFees(
   const statement = await listStudentFees(tenantId, studentId, enrollment?.academicSessionId);
   const payments = await prisma.feePayment.findMany({
     where: tenantScope(tenantId, { studentId }),
-    include: { items: true },
+    include: {
+      items: {
+        include: {
+          assignment: {
+            include: {
+              feeMaster: { include: { feeType: true } },
+            },
+          },
+        },
+      },
+    },
     orderBy: { paymentDate: "desc" },
     take: 40,
   });
+
+  const dueAssignment = statement.assignments.find((item) => item.totals.balance > 0) ?? null;
+
   return {
     statement,
-    payments: payments.map((payment) => ({
-      id: payment.id,
-      paymentId: payment.paymentId,
-      receiptNumber: payment.receiptNumber,
-      paymentDate: payment.paymentDate,
-      paymentMode: payment.paymentMode,
-      amount: payment.amount,
-      status: payment.status,
-      items: payment.items.map((item) => ({
-        amount: item.paidAmount,
-        assignmentId: item.assignmentId,
-      })),
-    })),
+    due: dueAssignment
+      ? {
+          amount: dueAssignment.totals.balance,
+          dueDate: dueAssignment.feeMaster.dueDate,
+          name: dueAssignment.feeMaster.feeType?.name ?? "Fee",
+          overdue: new Date(dueAssignment.feeMaster.dueDate) < new Date(),
+        }
+      : null,
+    payments: payments.map((payment) => {
+      const feeNames = [
+        ...new Set(
+          payment.items
+            .map((item) => item.assignment?.feeMaster?.feeType?.name)
+            .filter((name): name is string => Boolean(name)),
+        ),
+      ];
+      const totalAssigned = payment.items.reduce((sum, item) => sum + Number(item.paidAmount), 0);
+      return {
+        id: payment.id,
+        paymentId: payment.paymentId,
+        receiptNumber: payment.receiptNumber,
+        paymentDate: payment.paymentDate,
+        paymentMode: payment.paymentMode,
+        amount: payment.amount,
+        status: payment.status,
+        label: feeNames[0] ?? payment.paymentMode,
+        feeNames,
+        partial: totalAssigned > 0 && Number(payment.amount) < totalAssigned,
+        items: payment.items.map((item) => ({
+          amount: item.paidAmount,
+          assignmentId: item.assignmentId,
+          feeName: item.assignment?.feeMaster?.feeType?.name ?? null,
+        })),
+      };
+    }),
   };
 }
 
@@ -146,6 +214,8 @@ export async function getPortalChildDocuments(
       fileUrl: doc.fileUrl,
       folder: doc.folder.name,
       folderId: doc.folder.id,
+      mimeType: doc.mimeType,
+      sizeBytes: doc.sizeBytes,
       createdAt: doc.createdAt,
     })),
     certificates: generated.map((doc) => ({
