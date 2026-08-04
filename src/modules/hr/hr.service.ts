@@ -232,6 +232,9 @@ export interface StaffDetailsInput {
   workShift?: string | null;
   workLocation?: string | null;
   leaveAllowance?: number | null;
+  absenceDeduction?: number | null;
+  leavingDate?: Date | null;
+  resignationLetter?: string | null;
   bankAccountTitle?: string | null;
   bankAccountNumber?: string | null;
   bankName?: string | null;
@@ -446,7 +449,12 @@ export async function updateStaffProfile(
 export async function updateStaffStatus(
   tenantId: string,
   staffId: string,
-  input: { status: StaffStatus; disabledReason?: string | null },
+  input: {
+    status: StaffStatus;
+    disabledReason?: string | null;
+    leavingDate?: Date | null;
+    resignationLetter?: string | null;
+  },
 ) {
   await requireStaff(tenantId, staffId);
   if (input.status === StaffStatus.DISABLED && !input.disabledReason?.trim()) {
@@ -457,6 +465,12 @@ export async function updateStaffStatus(
     data: {
       status: input.status,
       disabledReason: input.status === StaffStatus.DISABLED ? input.disabledReason : null,
+      leavingDate:
+        input.status === StaffStatus.DISABLED
+          ? (input.leavingDate ?? new Date())
+          : null,
+      resignationLetter:
+        input.status === StaffStatus.DISABLED ? (input.resignationLetter ?? null) : null,
       user: {
         update: {
           status: input.status === StaffStatus.ACTIVE ? UserStatus.ACTIVE : UserStatus.DISABLED,
@@ -490,6 +504,26 @@ export async function markStaffAttendance(
   });
   if (count !== ids.length) {
     throw new AppError(400, "One or more active staff records are invalid", "INVALID_STAFF");
+  }
+  const lockedByLeave = await prisma.staffLeave.findMany({
+    where: tenantScope(tenantId, {
+      staffId: { in: ids },
+      status: StaffLeaveStatus.APPROVED,
+      fromDate: { lte: input.attendanceDate },
+      toDate: { gte: input.attendanceDate },
+    }),
+    select: { staffId: true },
+  });
+  if (lockedByLeave.length) {
+    const locked = new Set(lockedByLeave.map((item) => item.staffId));
+    const blocked = input.records.filter((record) => locked.has(record.staffId));
+    if (blocked.length) {
+      throw new AppError(
+        409,
+        "Cannot change attendance for staff on approved leave",
+        "LEAVE_LOCKED_ATTENDANCE",
+      );
+    }
   }
   await prisma.$transaction(
     input.records.map((record) =>
@@ -558,7 +592,7 @@ export async function applyStaffLeave(
   if (input.toDate < input.fromDate) {
     throw new AppError(400, "Invalid leave date range", "INVALID_DATE_RANGE");
   }
-  await requireStaff(tenantId, input.staffId);
+  const staff = await requireStaff(tenantId, input.staffId);
   const leaveType = await prisma.staffLeaveType.findFirst({
     where: tenantScope(tenantId, { id: input.leaveTypeId }),
   });
@@ -572,11 +606,59 @@ export async function applyStaffLeave(
     }),
   });
   if (overlap) throw new AppError(409, "Leave dates overlap an existing request", "LEAVE_OVERLAP");
+
+  const requestedDays = leaveDayCount(input.fromDate, input.toDate);
+  const yearStart = new Date(Date.UTC(input.fromDate.getUTCFullYear(), 0, 1));
+  const yearEnd = new Date(Date.UTC(input.fromDate.getUTCFullYear(), 11, 31));
+  const yearLeaves = await prisma.staffLeave.findMany({
+    where: tenantScope(tenantId, {
+      staffId: input.staffId,
+      leaveTypeId: input.leaveTypeId,
+      status: { in: [StaffLeaveStatus.PENDING, StaffLeaveStatus.APPROVED] },
+      fromDate: { lte: yearEnd },
+      toDate: { gte: yearStart },
+    }),
+  });
+  const usedDays = yearLeaves.reduce(
+    (sum, item) => sum + leaveDayCount(item.fromDate, item.toDate),
+    0,
+  );
+  const typeLimit = leaveType.annualLimit;
+  const staffLimit = staff.leaveAllowance;
+  const limit =
+    typeLimit != null && staffLimit != null
+      ? Math.min(typeLimit, staffLimit)
+      : (typeLimit ?? staffLimit ?? null);
+  if (limit != null && usedDays + requestedDays > limit) {
+    throw new AppError(
+      400,
+      `Leave quota exceeded (${usedDays + requestedDays}/${limit} days)`,
+      "LEAVE_QUOTA_EXCEEDED",
+    );
+  }
+
   const { attachment, ...rest } = input;
   return prisma.staffLeave.create({
     data: { tenantId, ...rest, attachment: attachment ?? undefined },
     include: { staff: { include: { user: true } }, leaveType: true },
   });
+}
+
+function leaveDayCount(fromDate: Date, toDate: Date) {
+  const start = Date.UTC(fromDate.getUTCFullYear(), fromDate.getUTCMonth(), fromDate.getUTCDate());
+  const end = Date.UTC(toDate.getUTCFullYear(), toDate.getUTCMonth(), toDate.getUTCDate());
+  return Math.floor((end - start) / 86_400_000) + 1;
+}
+
+function eachLeaveDate(fromDate: Date, toDate: Date) {
+  const days: Date[] = [];
+  const cur = new Date(Date.UTC(fromDate.getUTCFullYear(), fromDate.getUTCMonth(), fromDate.getUTCDate()));
+  const end = new Date(Date.UTC(toDate.getUTCFullYear(), toDate.getUTCMonth(), toDate.getUTCDate()));
+  while (cur <= end) {
+    days.push(new Date(cur));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return days;
 }
 
 export async function getStaffLeave(tenantId: string, leaveId: string) {
@@ -599,10 +681,11 @@ export async function reviewStaffLeave(
 ) {
   const leave = await prisma.staffLeave.findFirst({
     where: tenantScope(tenantId, { id: leaveId }),
+    include: { leaveType: true },
   });
   if (!leave) throw new AppError(404, "Leave request not found", "LEAVE_NOT_FOUND");
   const backToPending = input.status === StaffLeaveStatus.PENDING;
-  return prisma.staffLeave.update({
+  const updated = await prisma.staffLeave.update({
     where: { id: leaveId },
     data: {
       status: input.status,
@@ -612,6 +695,40 @@ export async function reviewStaffLeave(
     },
     include: { staff: { include: { user: true, designation: true } }, leaveType: true },
   });
+
+  if (input.status === StaffLeaveStatus.APPROVED) {
+    const note = `Approved leave: ${leave.leaveType.name}`;
+    await prisma.$transaction(
+      eachLeaveDate(leave.fromDate, leave.toDate).map((attendanceDate) =>
+        prisma.staffAttendance.upsert({
+          where: {
+            tenantId_staffId_attendanceDate: {
+              tenantId,
+              staffId: leave.staffId,
+              attendanceDate,
+            },
+          },
+          create: {
+            tenantId,
+            staffId: leave.staffId,
+            attendanceDate,
+            status: StaffAttendanceStatus.ABSENT,
+            note,
+            markedById: userId,
+          },
+          update: {
+            status: StaffAttendanceStatus.ABSENT,
+            note,
+            inTime: null,
+            outTime: null,
+            markedById: userId,
+          },
+        }),
+      ),
+    );
+  }
+
+  return updated;
 }
 
 export async function addStaffAdjustment(
@@ -628,6 +745,144 @@ export async function addStaffAdjustment(
   return prisma.staffAdjustment.create({
     data: { tenantId, staffId, ...input },
   });
+}
+
+export async function updateStaffAdjustment(
+  tenantId: string,
+  adjustmentId: string,
+  input: {
+    name?: string;
+    type?: AdjustmentType;
+    amount?: number;
+    isRecurring?: boolean;
+    isActive?: boolean;
+  },
+) {
+  const found = await prisma.staffAdjustment.findFirst({
+    where: tenantScope(tenantId, { id: adjustmentId }),
+  });
+  if (!found) throw new AppError(404, "Adjustment not found", "ADJUSTMENT_NOT_FOUND");
+  return prisma.staffAdjustment.update({
+    where: { id: adjustmentId },
+    data: input,
+  });
+}
+
+export async function deleteStaffAdjustment(tenantId: string, adjustmentId: string) {
+  const found = await prisma.staffAdjustment.findFirst({
+    where: tenantScope(tenantId, { id: adjustmentId }),
+  });
+  if (!found) throw new AppError(404, "Adjustment not found", "ADJUSTMENT_NOT_FOUND");
+  await prisma.staffAdjustment.delete({ where: { id: adjustmentId } });
+}
+
+export async function getStaffDetail(tenantId: string, staffId: string) {
+  const staff = await prisma.staffProfile.findFirst({
+    where: tenantScope(tenantId, { id: staffId }),
+    include: {
+      user: { include: { roles: { include: { role: true } } } },
+      department: true,
+      designation: true,
+      adjustments: { orderBy: { createdAt: "desc" } },
+      attendance: { orderBy: { attendanceDate: "desc" }, take: 120 },
+      leaves: {
+        include: { leaveType: true, reviewedBy: true },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      },
+      payrolls: {
+        include: { items: true, academicSession: true },
+        orderBy: { payrollMonth: "desc" },
+        take: 24,
+      },
+      ratings: { orderBy: { ratingDate: "desc" }, take: 20 },
+    },
+  });
+  if (!staff) throw new AppError(404, "Staff member not found", "STAFF_NOT_FOUND");
+  return staff;
+}
+
+export async function deleteStaffProfile(tenantId: string, staffId: string) {
+  const staff = await requireStaff(tenantId, staffId);
+  if (staff.status !== StaffStatus.DISABLED) {
+    throw new AppError(400, "Disable staff before deleting", "STAFF_NOT_DISABLED");
+  }
+  const paidPayroll = await prisma.payroll.count({
+    where: tenantScope(tenantId, { staffId, status: PayrollStatus.PAID }),
+  });
+  if (paidPayroll > 0) {
+    throw new AppError(409, "Cannot delete staff with paid payroll history", "STAFF_HAS_PAYROLL");
+  }
+  await prisma.$transaction(async (tx) => {
+    await tx.payroll.deleteMany({ where: { tenantId, staffId } });
+    await tx.staffAttendance.deleteMany({ where: { tenantId, staffId } });
+    await tx.staffLeave.deleteMany({ where: { tenantId, staffId } });
+    await tx.staffAdjustment.deleteMany({ where: { tenantId, staffId } });
+    await tx.teacherRating.deleteMany({ where: { tenantId, staffId } });
+    await tx.staffProfile.delete({ where: { id: staffId } });
+  });
+}
+
+export async function getPayrollPayslip(tenantId: string, payrollId: string) {
+  const payroll = await prisma.payroll.findFirst({
+    where: tenantScope(tenantId, { id: payrollId }),
+    include: {
+      items: true,
+      academicSession: true,
+      staff: {
+        include: { user: true, department: true, designation: true },
+      },
+      tenant: { select: { name: true, branding: true } },
+    },
+  });
+  if (!payroll) throw new AppError(404, "Payroll not found", "PAYROLL_NOT_FOUND");
+  const monthStart = payroll.payrollMonth;
+  const monthEnd = new Date(
+    Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0),
+  );
+  const attendance = await prisma.staffAttendance.findMany({
+    where: tenantScope(tenantId, {
+      staffId: payroll.staffId,
+      attendanceDate: { gte: monthStart, lte: monthEnd },
+    }),
+    orderBy: { attendanceDate: "asc" },
+  });
+  const leaves = await prisma.staffLeave.findMany({
+    where: tenantScope(tenantId, {
+      staffId: payroll.staffId,
+      status: StaffLeaveStatus.APPROVED,
+      fromDate: { lte: monthEnd },
+      toDate: { gte: monthStart },
+    }),
+    include: { leaveType: true },
+  });
+  return { payroll, attendance, leaves };
+}
+
+export async function listDisabledStaff(tenantId: string) {
+  return prisma.staffProfile.findMany({
+    where: tenantScope(tenantId, { status: StaffStatus.DISABLED }),
+    include: { user: true, department: true, designation: true },
+    orderBy: { employeeNumber: "asc" },
+  });
+}
+
+export async function applyOwnStaffLeave(
+  tenantId: string,
+  userId: string,
+  input: {
+    leaveTypeId: string;
+    fromDate: Date;
+    toDate: Date;
+    reason: string;
+    attachment?: { name: string; dataUrl: string } | null;
+  },
+) {
+  const staff = await prisma.staffProfile.findFirst({
+    where: tenantScope(tenantId, { userId, status: StaffStatus.ACTIVE }),
+  });
+  if (!staff) throw new AppError(404, "Staff profile not found for this user", "STAFF_NOT_FOUND");
+  return applyStaffLeave(tenantId, { ...input, staffId: staff.id });
 }
 
 export async function generatePayroll(
@@ -667,7 +922,11 @@ export async function generatePayroll(
       return units;
     }, 0);
     const basicSalary = Number(member.basicSalary);
-    const attendanceDeduction = Number(((basicSalary / 30) * absenceUnits).toFixed(2));
+    const perDay =
+      member.absenceDeduction != null
+        ? Number(member.absenceDeduction)
+        : basicSalary / 30;
+    const attendanceDeduction = Number((perDay * absenceUnits).toFixed(2));
     const earnings = member.adjustments
       .filter((item) => item.type === AdjustmentType.EARNING)
       .reduce((sum, item) => sum + Number(item.amount), 0);

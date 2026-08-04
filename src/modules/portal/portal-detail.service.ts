@@ -1,6 +1,7 @@
 import {
   HomeworkStatus,
   NoticeAudience,
+  StaffStatus,
   type ProductMode,
 } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
@@ -8,6 +9,7 @@ import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 import { createLeave } from "../attendance/attendance.service.js";
 import { listStudentFees } from "../fees/fees.service.js";
+import { addTeacherRating } from "../hr/hr.service.js";
 import { submitHomework } from "../homework/homework.service.js";
 import {
   assertAccessibleStudent,
@@ -222,7 +224,7 @@ export async function getPortalChildHomework(
   productMode: ProductMode | null,
   studentId: string,
 ) {
-  assertProductMode(productMode, "LMS");
+  assertProductMode(productMode, "SHARED");
   const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
   const enrollment = currentEnrollment(student);
   if (!enrollment) return [];
@@ -264,10 +266,10 @@ export async function submitPortalHomework(
   viewer: PortalViewer,
   productMode: ProductMode | null,
   homeworkId: string,
-  answerText: string,
+  answerText?: string | null,
   attachmentUrl?: string | null,
 ) {
-  assertProductMode(productMode, "LMS");
+  assertProductMode(productMode, "SHARED");
   if (portalRole(viewer) !== "STUDENT") {
     throw new AppError(403, "Only students can submit homework", "PORTAL_FORBIDDEN");
   }
@@ -278,7 +280,7 @@ export async function submitPortalHomework(
   if (!enrollment) throw new AppError(400, "No active enrolment", "NO_ENROLLMENT");
   return submitHomework(tenantId, viewer.userId, homeworkId, {
     studentEnrollmentId: enrollment.id,
-    answerText,
+    answerText: answerText ?? null,
     attachmentUrl,
   });
 }
@@ -369,4 +371,92 @@ export async function updatePortalStudentProfile(
     photoUrl: student.photoUrl,
     admissionNumber: student.admissionNumber,
   };
+}
+
+export async function listPortalTeachers(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+) {
+  assertProductMode(productMode, "CMS");
+  const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
+  const enrollment = currentEnrollment(student);
+  if (!enrollment) return [];
+
+  const classSubjects = await prisma.classSubject.findMany({
+    where: tenantScope(tenantId, {
+      classSectionId: enrollment.classSectionId,
+      teacherId: { not: null },
+    }),
+    include: {
+      subject: true,
+      teacher: {
+        include: {
+          staffProfile: {
+            include: { designation: true },
+          },
+        },
+      },
+    },
+  });
+
+  const byStaff = new Map<
+    string,
+    {
+      id: string;
+      staffId: string;
+      name: string;
+      subject: string | null;
+      photoUrl: string | null;
+      designation: string | null;
+      subjects: Set<string>;
+    }
+  >();
+
+  for (const item of classSubjects) {
+    const staff = item.teacher?.staffProfile;
+    if (!staff || staff.status !== StaffStatus.ACTIVE) continue;
+    const existing = byStaff.get(staff.id);
+    if (existing) {
+      existing.subjects.add(item.subject.name);
+      existing.subject = [...existing.subjects].sort().join(", ");
+      continue;
+    }
+    byStaff.set(staff.id, {
+      id: staff.userId,
+      staffId: staff.id,
+      name: `${item.teacher!.firstName} ${item.teacher!.lastName}`.trim(),
+      subject: item.subject.name,
+      photoUrl: staff.photoUrl ?? item.teacher!.avatarUrl,
+      designation: staff.designation?.name ?? null,
+      subjects: new Set([item.subject.name]),
+    });
+  }
+
+  return [...byStaff.values()]
+    .map(({ subjects: _subjects, ...row }) => row)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function submitPortalTeacherRating(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+  staffId: string,
+  input: { rating: number; comment?: string | null; ratingDate: Date },
+) {
+  assertProductMode(productMode, "CMS");
+  await assertAccessibleStudent(tenantId, viewer, studentId);
+  const teachers = await listPortalTeachers(tenantId, viewer, productMode, studentId);
+  if (!teachers.some((item) => item.staffId === staffId)) {
+    throw new AppError(400, "Teacher is not assigned to this student", "INVALID_TEACHER");
+  }
+  return addTeacherRating(tenantId, viewer.userId, {
+    staffId,
+    rating: input.rating,
+    comment: input.comment,
+    ratingDate: input.ratingDate,
+  });
 }

@@ -15,7 +15,9 @@ import {
   getPortalOverviewController,
   getPortalTimetableController,
   listPortalNoticesController,
+  listPortalTeachersController,
   submitPortalHomeworkController,
+  submitPortalTeacherRatingController,
   updatePortalStudentProfileController,
   uploadPortalDocumentController,
   uploadPortalStudentPhotoController,
@@ -48,6 +50,11 @@ portalRouter.post(
 );
 portalRouter.get("/children/:studentId/timetable", asyncHandler(getPortalTimetableController));
 portalRouter.get("/children/:studentId/homework", asyncHandler(getPortalHomeworkController));
+portalRouter.get("/children/:studentId/teachers", asyncHandler(listPortalTeachersController));
+portalRouter.post(
+  "/children/:studentId/teachers/:staffId/ratings",
+  asyncHandler(submitPortalTeacherRatingController),
+);
 portalRouter.put(
   "/children/:studentId/profile",
   asyncHandler(updatePortalStudentProfileController),

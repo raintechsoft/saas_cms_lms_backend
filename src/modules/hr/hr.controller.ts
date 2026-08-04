@@ -10,6 +10,7 @@ import { z } from "zod";
 import {
   addStaffAdjustment,
   addTeacherRating,
+  applyOwnStaffLeave,
   applyStaffLeave,
   createDepartment,
   createDesignation,
@@ -19,12 +20,17 @@ import {
   deleteDepartment,
   deleteDesignation,
   deletePayParameter,
+  deleteStaffAdjustment,
   deleteStaffLeaveType,
+  deleteStaffProfile,
   generatePayroll,
   getHrSetup,
+  getPayrollPayslip,
   getStaffAttendanceReport,
+  getStaffDetail,
   getStaffLeave,
   getTeacherRatingsSummary,
+  listDisabledStaff,
   markStaffAttendance,
   payPayroll,
   revertPayroll,
@@ -32,6 +38,7 @@ import {
   updateDepartment,
   updateDesignation,
   updatePayParameter,
+  updateStaffAdjustment,
   updateStaffLeaveType,
   updateStaffProfile,
   updateStaffStatus,
@@ -74,6 +81,9 @@ const staffDetailsShape = {
   workShift: optionalText(30),
   workLocation: optionalText(100),
   leaveAllowance: z.coerce.number().int().min(0).max(366).nullable().optional(),
+  absenceDeduction: z.coerce.number().min(0).nullable().optional(),
+  leavingDate: z.coerce.date().nullable().optional(),
+  resignationLetter: optionalText(5000),
   bankAccountTitle: optionalText(100),
   bankAccountNumber: optionalText(50),
   bankName: optionalText(100),
@@ -136,6 +146,8 @@ const staffBody = z
 const statusBody = z.object({
   status: z.nativeEnum(StaffStatus),
   disabledReason: z.string().trim().max(1000).nullable().optional(),
+  leavingDate: z.coerce.date().nullable().optional(),
+  resignationLetter: optionalText(5000),
 });
 const staffUpdateBody = z.object(staffDetailsShape).partial();
 const attendanceBody = z.object({
@@ -167,6 +179,7 @@ const leaveBody = z.object({
     .nullable()
     .optional(),
 });
+const ownLeaveBody = leaveBody.omit({ staffId: true });
 const reviewBody = z.object({
   status: z.nativeEnum(StaffLeaveStatus),
   reviewNote: z.string().trim().max(1000).nullable().optional(),
@@ -176,6 +189,9 @@ const adjustmentBody = z.object({
   type: z.nativeEnum(AdjustmentType),
   amount: z.coerce.number().positive(),
   isRecurring: z.boolean().optional(),
+});
+const adjustmentUpdateBody = adjustmentBody.partial().extend({
+  isActive: z.boolean().optional(),
 });
 const payrollBody = z.object({
   academicSessionId: z.string().min(1),
@@ -291,6 +307,21 @@ export async function updateStaffProfileController(req: Request, res: Response) 
   });
 }
 
+export async function getStaffDetailController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getStaffDetail(req.auth!.tenantId!, id) });
+}
+
+export async function deleteStaffProfileController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteStaffProfile(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function listDisabledStaffController(req: Request, res: Response) {
+  res.json({ data: await listDisabledStaff(req.auth!.tenantId!) });
+}
+
 export async function updateStaffStatusController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   res.json({
@@ -323,6 +354,16 @@ export async function applyStaffLeaveController(req: Request, res: Response) {
   });
 }
 
+export async function applyOwnStaffLeaveController(req: Request, res: Response) {
+  res.status(201).json({
+    data: await applyOwnStaffLeave(
+      req.auth!.tenantId!,
+      req.auth!.userId,
+      ownLeaveBody.parse(req.body),
+    ),
+  });
+}
+
 export async function getStaffLeaveController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   res.json({ data: await getStaffLeave(req.auth!.tenantId!, id) });
@@ -351,10 +392,32 @@ export async function addStaffAdjustmentController(req: Request, res: Response) 
   });
 }
 
+export async function updateStaffAdjustmentController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({
+    data: await updateStaffAdjustment(
+      req.auth!.tenantId!,
+      id,
+      adjustmentUpdateBody.parse(req.body),
+    ),
+  });
+}
+
+export async function deleteStaffAdjustmentController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteStaffAdjustment(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
 export async function generatePayrollController(req: Request, res: Response) {
   res.status(201).json({
     data: await generatePayroll(req.auth!.tenantId!, payrollBody.parse(req.body)),
   });
+}
+
+export async function getPayrollPayslipController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getPayrollPayslip(req.auth!.tenantId!, id) });
 }
 
 export async function payPayrollController(req: Request, res: Response) {

@@ -15,7 +15,7 @@ import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 import { getExamResults } from "../exams/exams.service.js";
-import { getHomeworkReport } from "../homework/homework.service.js";
+import { getHomeworkReport, HOMEWORK_REPORTS } from "../homework/homework.service.js";
 import { FEE_REPORTS } from "./fee-reports.service.js";
 import { STUDENT_REPORTS } from "./student-reports.service.js";
 
@@ -234,9 +234,10 @@ export async function getReportHub(
     coreReports,
     studentReports: productMode === "LMS" ? [] : STUDENT_REPORTS,
     feeReports: productMode === "LMS" ? [] : FEE_REPORTS,
+    homeworkReports: HOMEWORK_REPORTS,
     modules: modules.filter(({ key }) => {
       if (productMode === "LMS") return !["finance", "hr"].includes(key);
-      if (productMode === "CMS") return !["timetable", "homework"].includes(key);
+      if (productMode === "CMS") return !["timetable"].includes(key);
       return true;
     }),
   };

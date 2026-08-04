@@ -9,18 +9,23 @@ import {
   createExamAspect,
   createExamGrade,
   createExamGroup,
+  createExamLink,
   createExamSchedule,
   deleteExam,
   deleteExamAspect,
   deleteExamGrade,
   deleteExamGroup,
+  deleteExamLink,
   deleteExamSchedule,
   deleteExamSubjectLink,
   deleteMarkComponent,
   getExamResults,
   getExamGroupResults,
+  getExamLinkResults,
   getExamSetup,
   getScheduleRoster,
+  listExamLinks,
+  listExamStudents,
   listExamSubjectLinks,
   publishExam,
   unpublishExam,
@@ -33,6 +38,7 @@ import {
   updateExamGrade,
   updateExamGroup,
   updateExamSchedule,
+  updateExamStudentPortalVisibility,
   updateMarkComponent,
 } from "./exams.service.js";
 
@@ -60,6 +66,10 @@ const examBody = z.object({
   name: z.string().trim().min(1).max(100),
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),
+  description: z.string().trim().max(2000).nullable().optional(),
+});
+const listStudentsQuery = z.object({
+  classSectionId: z.string().min(1).optional(),
 });
 const scheduleBody = z.object({
   classSectionId: z.string().min(1),
@@ -70,6 +80,15 @@ const scheduleBody = z.object({
   room: z.string().trim().max(50).nullable().optional(),
   maximumMarks: z.coerce.number().positive(),
   minimumMarks: z.coerce.number().min(0),
+  creditHours: z.coerce.number().min(0).max(100).nullable().optional(),
+});
+const examLinkBody = z.object({
+  name: z.string().trim().min(1).max(100),
+  resultType: z.nativeEnum(ExamResultType),
+  examIds: z.array(z.string().min(1)).min(2),
+});
+const portalVisibilityBody = z.object({
+  showOnPortal: z.boolean(),
 });
 const componentBody = z.object({
   name: z.string().trim().min(1).max(100),
@@ -166,6 +185,14 @@ export async function assignExamStudentsController(req: Request, res: Response) 
   });
 }
 
+export async function listExamStudentsController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const query = listStudentsQuery.parse(req.query);
+  res.json({
+    data: await listExamStudents(req.auth!.tenantId!, id, query.classSectionId),
+  });
+}
+
 export async function getScheduleRosterController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   res.json({ data: await getScheduleRoster(req.auth!.tenantId!, id) });
@@ -258,6 +285,35 @@ export async function getExamResultsController(req: Request, res: Response) {
 export async function getExamGroupResultsController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   res.json({ data: await getExamGroupResults(req.auth!.tenantId!, id) });
+}
+
+export async function listExamLinksController(req: Request, res: Response) {
+  res.json({ data: await listExamLinks(req.auth!.tenantId!) });
+}
+
+export async function createExamLinkController(req: Request, res: Response) {
+  res.status(201).json({
+    data: await createExamLink(req.auth!.tenantId!, examLinkBody.parse(req.body)),
+  });
+}
+
+export async function deleteExamLinkController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteExamLink(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function getExamLinkResultsController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await getExamLinkResults(req.auth!.tenantId!, id) });
+}
+
+export async function updateExamStudentPortalVisibilityController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const { showOnPortal } = portalVisibilityBody.parse(req.body);
+  res.json({
+    data: await updateExamStudentPortalVisibility(req.auth!.tenantId!, id, showOnPortal),
+  });
 }
 
 const gradeUpdateBody = gradeBody.partial().omit({ resultType: true });

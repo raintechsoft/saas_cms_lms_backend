@@ -27,6 +27,7 @@ async function buildStudentSnapshot(
   const enrollment = currentEnrollment(student);
   const includeLms = hasEntitlement(productMode, "LMS");
   const includeCms = hasEntitlement(productMode, "CMS");
+  const includeHomework = Boolean(productMode);
   if (!enrollment) {
     return {
       student: {
@@ -68,7 +69,7 @@ async function buildStudentSnapshot(
             orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
           })
         : Promise.resolve([]),
-      includeLms
+      includeHomework
         ? prisma.homework.findMany({
             where: tenantScope(tenantId, {
               academicSessionId: sessionId,
@@ -94,6 +95,7 @@ async function buildStudentSnapshot(
       prisma.examStudent.findMany({
         where: tenantScope(tenantId, {
           studentEnrollmentId: enrollment.id,
+          showOnPortal: true,
           exam: { status: ExamStatus.PUBLISHED },
         }),
         include: {
@@ -283,7 +285,7 @@ export async function getPortalOverview(
 
   return {
     role: isStudent ? "STUDENT" : "PARENT",
-    canSubmitHomework: isStudent && hasEntitlement(productMode, "LMS"),
+    canSubmitHomework: isStudent && Boolean(productMode),
     productMode,
     notices: notices.slice(0, 5).map((notice) => ({
       id: notice.id,

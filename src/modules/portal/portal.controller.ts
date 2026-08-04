@@ -13,7 +13,9 @@ import {
   getPortalChildLeaves,
   getPortalChildTimetable,
   listPortalNotices,
+  listPortalTeachers,
   submitPortalHomework,
+  submitPortalTeacherRating,
   updatePortalStudentProfile,
   uploadPortalChildDocument,
 } from "./portal-detail.service.js";
@@ -30,9 +32,35 @@ const leaveBody = z.object({
   toDate: z.coerce.date(),
   reason: z.string().trim().min(3).max(1000),
 });
-const homeworkBody = z.object({
-  answerText: z.string().trim().min(1).max(5000),
-  attachmentUrl: z.string().url().nullable().optional().or(z.literal("").transform(() => null)),
+const homeworkBody = z
+  .object({
+    answerText: z.string().trim().max(5000).nullable().optional().or(z.literal("").transform(() => null)),
+    attachmentUrl: z
+      .string()
+      .min(1)
+      .max(30_000_000)
+      .refine(
+        (value) =>
+          value.startsWith("http://") ||
+          value.startsWith("https://") ||
+          value.startsWith("data:"),
+        "Attachment must be a link or an uploaded file",
+      )
+      .nullable()
+      .optional()
+      .or(z.literal("").transform(() => null)),
+  })
+  .refine((value) => Boolean(value.answerText?.trim() || value.attachmentUrl), {
+    message: "Answer text or attachment is required",
+  });
+const teacherRatingBody = z.object({
+  rating: z.coerce.number().int().min(1).max(5),
+  comment: z.string().trim().max(1000).nullable().optional(),
+  ratingDate: z.coerce.date(),
+});
+const teacherParams = z.object({
+  studentId: z.string().min(1),
+  staffId: z.string().min(1),
 });
 const studentProfileBody = z.object({
   firstName: z.string().trim().min(1).max(80).optional(),
@@ -175,6 +203,33 @@ export async function submitPortalHomeworkController(req: Request, res: Response
       id,
       body.answerText,
       body.attachmentUrl,
+    ),
+  });
+}
+
+export async function listPortalTeachersController(req: Request, res: Response) {
+  const { studentId } = studentParams.parse(req.params);
+  res.json({
+    data: await listPortalTeachers(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+    ),
+  });
+}
+
+export async function submitPortalTeacherRatingController(req: Request, res: Response) {
+  const { studentId, staffId } = teacherParams.parse(req.params);
+  const body = teacherRatingBody.parse(req.body);
+  res.status(201).json({
+    data: await submitPortalTeacherRating(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      staffId,
+      body,
     ),
   });
 }

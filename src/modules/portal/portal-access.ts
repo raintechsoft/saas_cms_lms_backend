@@ -78,9 +78,13 @@ export function portalRole(viewer: PortalViewer): "STUDENT" | "PARENT" {
 
 export function assertProductMode(
   productMode: ProductMode | null,
-  needed: "CMS" | "LMS",
+  needed: "CMS" | "LMS" | "SHARED",
 ) {
-  if (!productMode || (productMode !== "BOTH" && productMode !== needed)) {
+  if (!productMode) {
+    throw new AppError(403, `${needed} is not enabled for this tenant`, "MODULE_NOT_ENTITLED");
+  }
+  if (needed === "SHARED") return;
+  if (productMode !== "BOTH" && productMode !== needed) {
     throw new AppError(403, `${needed} is not enabled for this tenant`, "MODULE_NOT_ENTITLED");
   }
 }

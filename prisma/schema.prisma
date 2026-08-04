@@ -318,6 +318,7 @@ model Tenant {
   markComponents         ExamMarkComponent[]
   markComponentScores    ExamMarkComponentScore[]
   examSubjectLinks       ExamSubjectLink[]
+  examLinks              ExamLink[]
   departments            Department[]
   designations           Designation[]
   staffLeaveTypes        StaffLeaveType[]
@@ -1259,6 +1260,7 @@ model Exam {
   tenantId    String              @map("tenant_id")
   examGroupId String              @map("exam_group_id")
   name        String
+  description String?             @db.Text
   startDate   DateTime            @map("start_date") @db.Date
   endDate     DateTime            @map("end_date") @db.Date
   status      ExamStatus          @default(DRAFT)
@@ -1289,6 +1291,7 @@ model ExamSchedule {
   room           String?
   maximumMarks   Decimal             @map("maximum_marks") @db.Decimal(8, 2)
   minimumMarks   Decimal             @map("minimum_marks") @db.Decimal(8, 2)
+  creditHours    Decimal?            @map("credit_hours") @db.Decimal(6, 2)
   createdAt      DateTime            @default(now()) @map("created_at")
   updatedAt      DateTime            @updatedAt @map("updated_at")
   tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1309,6 +1312,7 @@ model ExamStudent {
   examId              String            @map("exam_id")
   studentEnrollmentId String            @map("student_enrollment_id")
   rollNumber          String?           @map("roll_number")
+  showOnPortal        Boolean           @default(true) @map("show_on_portal")
   createdAt           DateTime          @default(now()) @map("created_at")
   tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   exam                Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
@@ -1414,6 +1418,23 @@ model ExamSubjectLink {
   @@map("exam_subject_links")
 }
 
+/// Persisted Link Exams bundle for school/college consolidated results.
+/// Result is read against finalExamId (last linked exam) with all examIds merged.
+model ExamLink {
+  id          String         @id @default(cuid())
+  tenantId    String         @map("tenant_id")
+  name        String
+  resultType  ExamResultType @map("result_type")
+  finalExamId String         @map("final_exam_id")
+  examIds     Json           @map("exam_ids")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, finalExamId])
+  @@map("exam_links")
+}
+
 model Department {
   id        String         @id @default(cuid())
   tenantId  String         @map("tenant_id")
@@ -1490,6 +1511,9 @@ model StaffProfile {
   workShift          String?             @map("work_shift")
   workLocation       String?             @map("work_location")
   leaveAllowance     Int?                @map("leave_allowance")
+  absenceDeduction   Decimal?            @map("absence_deduction") @db.Decimal(12, 2)
+  leavingDate        DateTime?           @map("leaving_date") @db.Date
+  resignationLetter  String?             @map("resignation_letter") @db.Text
   bankAccountTitle   String?             @map("bank_account_title")
   bankAccountNumber  String?             @map("bank_account_number")
   bankName           String?             @map("bank_name")

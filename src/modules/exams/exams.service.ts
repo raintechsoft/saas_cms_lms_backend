@@ -39,53 +39,258 @@ function validateDateRange(startDate: Date, endDate: Date) {
   }
 }
 
+function scheduleMaximumMarks(schedule: {
+  maximumMarks: { toString(): string } | number;
+  components?: Array<{ maximumMarks: { toString(): string } | number }>;
+}) {
+  const components = schedule.components ?? [];
+  if (components.length > 0) {
+    return components.reduce((sum, component) => sum + Number(component.maximumMarks), 0);
+  }
+  return Number(schedule.maximumMarks);
+}
+
+function findGradeByPercent<T extends { minPercent: { toString(): string } | number; maxPercent: { toString(): string } | number }>(
+  grades: T[],
+  percentage: number,
+) {
+  return grades.find(
+    (item) => percentage >= Number(item.minPercent) && percentage <= Number(item.maxPercent),
+  );
+}
+
+function computeGpa(
+  subjects: Array<{ gradePoint: number | null; creditHours: number | null }>,
+) {
+  let weighted = 0;
+  let creditSum = 0;
+  const points: number[] = [];
+  for (const subject of subjects) {
+    if (subject.gradePoint == null) continue;
+    points.push(subject.gradePoint);
+    const credits = subject.creditHours != null ? Number(subject.creditHours) : 0;
+    if (credits > 0) {
+      weighted += subject.gradePoint * credits;
+      creditSum += credits;
+    }
+  }
+  if (creditSum > 0) return Number((weighted / creditSum).toFixed(2));
+  if (points.length > 0) {
+    return Number((points.reduce((sum, point) => sum + point, 0) / points.length).toFixed(2));
+  }
+  return null;
+}
+
+type SubjectLinkRow = {
+  id: string;
+  subjectIds: unknown;
+  mergeType: string;
+  bifurcationColumns: number;
+};
+
+type MarkSubjectRow = {
+  name: string;
+  subjectIds: string[];
+  obtainedMarks: number;
+  maximumMarks: number;
+  percentage: number;
+  isAbsent: boolean;
+  creditHours: number | null;
+  gradePoint: number | null;
+  linked: boolean;
+  mergeType?: string;
+  bifurcationColumns?: number;
+  parts?: Array<{
+    name: string;
+    subjectId: string;
+    obtainedMarks: number;
+    maximumMarks: number;
+    isAbsent: boolean;
+  }>;
+};
+
+function buildSubjectRows(
+  marks: Array<{
+    marksObtained: { toString(): string } | number;
+    isAbsent: boolean;
+    schedule: {
+      maximumMarks: { toString(): string } | number;
+      creditHours?: { toString(): string } | number | null;
+      components?: Array<{ maximumMarks: { toString(): string } | number }>;
+      classSubject: { subject: { id: string; name: string } };
+    };
+  }>,
+  subjectLinks: SubjectLinkRow[],
+  grades: Array<{
+    minPercent: { toString(): string } | number;
+    maxPercent: { toString(): string } | number;
+    gradePoint?: { toString(): string } | number | null;
+  }>,
+  isGpa: boolean,
+): MarkSubjectRow[] {
+  const markRows = marks.map((mark) => {
+    const maximumMarks = scheduleMaximumMarks(mark.schedule);
+    const obtainedMarks = Number(mark.marksObtained);
+    const percentage = maximumMarks ? (obtainedMarks / maximumMarks) * 100 : 0;
+    const grade = findGradeByPercent(grades, percentage);
+    const creditHours =
+      mark.schedule.creditHours != null && mark.schedule.creditHours !== undefined
+        ? Number(mark.schedule.creditHours)
+        : null;
+    return {
+      subjectId: mark.schedule.classSubject.subject.id,
+      name: mark.schedule.classSubject.subject.name,
+      obtainedMarks,
+      maximumMarks,
+      percentage,
+      isAbsent: mark.isAbsent,
+      creditHours,
+      gradePoint:
+        isGpa && grade?.gradePoint != null
+          ? Number(grade.gradePoint)
+          : grade?.gradePoint != null
+            ? Number(grade.gradePoint)
+            : null,
+    };
+  });
+
+  const used = new Set<string>();
+  const subjects: MarkSubjectRow[] = [];
+
+  for (const link of subjectLinks) {
+    const linkIds = Array.isArray(link.subjectIds)
+      ? (link.subjectIds as string[])
+      : [];
+    const matched = markRows.filter((row) => linkIds.includes(row.subjectId));
+    if (matched.length < 2) continue;
+    matched.forEach((row) => used.add(row.subjectId));
+    const parts = matched.map((row) => ({
+      name: row.name,
+      subjectId: row.subjectId,
+      obtainedMarks: row.obtainedMarks,
+      maximumMarks: row.maximumMarks,
+      isAbsent: row.isAbsent,
+    }));
+    const mergeType = link.mergeType === "AVERAGE" ? "AVERAGE" : "MERGE";
+    let obtainedMarks: number;
+    let maximumMarks: number;
+    if (mergeType === "AVERAGE") {
+      obtainedMarks =
+        matched.reduce((sum, row) => sum + row.obtainedMarks, 0) / matched.length;
+      maximumMarks =
+        matched.reduce((sum, row) => sum + row.maximumMarks, 0) / matched.length;
+    } else {
+      obtainedMarks = matched.reduce((sum, row) => sum + row.obtainedMarks, 0);
+      maximumMarks = matched.reduce((sum, row) => sum + row.maximumMarks, 0);
+    }
+    const percentage = maximumMarks ? (obtainedMarks / maximumMarks) * 100 : 0;
+    const grade = findGradeByPercent(grades, percentage);
+    const creditHoursValues = matched
+      .map((row) => row.creditHours)
+      .filter((value): value is number => value != null && value > 0);
+    subjects.push({
+      name: matched.map((row) => row.name).join(" + "),
+      subjectIds: matched.map((row) => row.subjectId),
+      obtainedMarks: Number(obtainedMarks.toFixed(2)),
+      maximumMarks: Number(maximumMarks.toFixed(2)),
+      percentage: Number(percentage.toFixed(2)),
+      isAbsent: matched.every((row) => row.isAbsent),
+      creditHours:
+        creditHoursValues.length > 0
+          ? Number(
+              (
+                creditHoursValues.reduce((sum, value) => sum + value, 0) /
+                (mergeType === "AVERAGE" ? creditHoursValues.length : 1)
+              ).toFixed(2),
+            )
+          : null,
+      gradePoint: grade?.gradePoint != null ? Number(grade.gradePoint) : null,
+      linked: true,
+      mergeType,
+      bifurcationColumns: link.bifurcationColumns,
+      parts,
+    });
+  }
+
+  for (const row of markRows) {
+    if (used.has(row.subjectId)) continue;
+    subjects.push({
+      name: row.name,
+      subjectIds: [row.subjectId],
+      obtainedMarks: row.obtainedMarks,
+      maximumMarks: row.maximumMarks,
+      percentage: Number(row.percentage.toFixed(2)),
+      isAbsent: row.isAbsent,
+      creditHours: row.creditHours,
+      gradePoint: row.gradePoint,
+      linked: false,
+    });
+  }
+
+  return subjects;
+}
+
 export async function getExamSetup(tenantId: string) {
   const currentSession = await prisma.academicSession.findFirst({
     where: tenantScope(tenantId, { isCurrent: true }),
   });
-  const [sessions, grades, groups, classSections, templates, subjectLinks] = await Promise.all([
-    prisma.academicSession.findMany({
-      where: tenantScope(tenantId, {}),
-      orderBy: { startDate: "desc" },
-    }),
-    prisma.examGrade.findMany({
-      where: tenantScope(tenantId, {}),
-      orderBy: [{ resultType: "asc" }, { minPercent: "desc" }],
-    }),
-    prisma.examGroup.findMany({
-      where: tenantScope(tenantId, {}),
-      include: {
-        academicSession: true,
-        exams: { include: examInclude, orderBy: { startDate: "desc" } },
-      },
-      orderBy: { createdAt: "desc" },
-    }),
-    prisma.classSection.findMany({
-      where: tenantScope(
-        tenantId,
-        currentSession ? { academicSessionId: currentSession.id } : {},
-      ),
-      include: {
-        academicClass: true,
-        section: true,
-        subjects: { include: { subject: true } },
-      },
-      orderBy: [{ academicClass: { sortOrder: "asc" } }, { section: { name: "asc" } }],
-    }),
-    prisma.documentTemplate.findMany({
-      where: tenantScope(tenantId, {
-        type: {
-          in: [DocumentTemplateType.ADMIT_CARD, DocumentTemplateType.MARKSHEET],
-        },
+  const [sessions, grades, groups, classSections, templates, subjectLinks, links] =
+    await Promise.all([
+      prisma.academicSession.findMany({
+        where: tenantScope(tenantId, {}),
+        orderBy: { startDate: "desc" },
       }),
-      orderBy: { name: "asc" },
-    }),
-    prisma.examSubjectLink.findMany({
-      where: tenantScope(tenantId, {}),
-      orderBy: { updatedAt: "desc" },
-    }),
-  ]);
-  return { currentSession, sessions, grades, groups, classSections, templates, subjectLinks };
+      prisma.examGrade.findMany({
+        where: tenantScope(tenantId, {}),
+        orderBy: [{ resultType: "asc" }, { minPercent: "desc" }],
+      }),
+      prisma.examGroup.findMany({
+        where: tenantScope(tenantId, {}),
+        include: {
+          academicSession: true,
+          exams: { include: examInclude, orderBy: { startDate: "desc" } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.classSection.findMany({
+        where: tenantScope(
+          tenantId,
+          currentSession ? { academicSessionId: currentSession.id } : {},
+        ),
+        include: {
+          academicClass: true,
+          section: true,
+          subjects: { include: { subject: true } },
+        },
+        orderBy: [{ academicClass: { sortOrder: "asc" } }, { section: { name: "asc" } }],
+      }),
+      prisma.documentTemplate.findMany({
+        where: tenantScope(tenantId, {
+          type: {
+            in: [DocumentTemplateType.ADMIT_CARD, DocumentTemplateType.MARKSHEET],
+          },
+        }),
+        orderBy: { name: "asc" },
+      }),
+      prisma.examSubjectLink.findMany({
+        where: tenantScope(tenantId, {}),
+        orderBy: { updatedAt: "desc" },
+      }),
+      prisma.examLink.findMany({
+        where: tenantScope(tenantId, {}),
+        orderBy: { updatedAt: "desc" },
+      }),
+    ]);
+  return {
+    currentSession,
+    sessions,
+    grades,
+    groups,
+    classSections,
+    templates,
+    subjectLinks,
+    links,
+  };
 }
 
 export async function createExamGrade(
@@ -132,7 +337,13 @@ export async function createExamGroup(
 
 export async function createExam(
   tenantId: string,
-  input: { examGroupId: string; name: string; startDate: Date; endDate: Date },
+  input: {
+    examGroupId: string;
+    name: string;
+    startDate: Date;
+    endDate: Date;
+    description?: string | null;
+  },
 ) {
   validateDateRange(input.startDate, input.endDate);
   const group = await prisma.examGroup.findFirst({
@@ -161,6 +372,7 @@ export async function createExamSchedule(
     room?: string | null;
     maximumMarks: number;
     minimumMarks: number;
+    creditHours?: number | null;
   },
 ) {
   const exam = await requireExam(tenantId, examId);
@@ -351,6 +563,31 @@ export async function assignExamStudents(
   return prisma.examStudent.findMany({
     where: tenantScope(tenantId, { examId }),
     include: { studentEnrollment: { include: { student: true, classSection: true } } },
+    orderBy: [{ rollNumber: "asc" }],
+  });
+}
+
+export async function listExamStudents(
+  tenantId: string,
+  examId: string,
+  classSectionId?: string,
+) {
+  await requireExam(tenantId, examId);
+  return prisma.examStudent.findMany({
+    where: tenantScope(tenantId, {
+      examId,
+      ...(classSectionId
+        ? { studentEnrollment: { classSectionId } }
+        : {}),
+    }),
+    include: {
+      studentEnrollment: {
+        include: {
+          student: true,
+          classSection: { include: { academicClass: true, section: true } },
+        },
+      },
+    },
     orderBy: [{ rollNumber: "asc" }],
   });
 }
@@ -684,7 +921,8 @@ export async function unpublishExam(tenantId: string, examId: string) {
 
 export async function getExamResults(tenantId: string, examId: string) {
   const exam = await requireExam(tenantId, examId);
-  const [students, grades] = await Promise.all([
+  const isGpa = exam.examGroup.resultType === "GPA";
+  const [students, grades, subjectLinks] = await Promise.all([
     prisma.examStudent.findMany({
       where: tenantScope(tenantId, { examId }),
       include: {
@@ -711,60 +949,218 @@ export async function getExamResults(tenantId: string, examId: string) {
       where: tenantScope(tenantId, { resultType: exam.examGroup.resultType }),
       orderBy: { minPercent: "desc" },
     }),
+    prisma.examSubjectLink.findMany({
+      where: tenantScope(tenantId, {}),
+      orderBy: { updatedAt: "desc" },
+    }),
   ]);
   const results = students.map((student) => {
-    const maximumMarks = student.marks.reduce((sum, mark) => {
-      const components = mark.schedule.components ?? [];
-      if (components.length > 0) {
-        return (
-          sum +
-          components.reduce(
-            (componentSum, component) => componentSum + Number(component.maximumMarks),
-            0,
-          )
-        );
-      }
-      return sum + Number(mark.schedule.maximumMarks);
-    }, 0);
+    const maximumMarks = student.marks.reduce(
+      (sum, mark) => sum + scheduleMaximumMarks(mark.schedule),
+      0,
+    );
     const obtainedMarks = student.marks.reduce(
       (sum, mark) => sum + Number(mark.marksObtained),
       0,
     );
     const percentage = maximumMarks ? (obtainedMarks / maximumMarks) * 100 : 0;
-    const grade = grades.find(
-      (item) => percentage >= Number(item.minPercent) && percentage <= Number(item.maxPercent),
-    );
+    const grade = findGradeByPercent(grades, percentage);
     const subjectFailed = student.marks.some(
       (mark) => mark.isAbsent || Number(mark.marksObtained) < Number(mark.schedule.minimumMarks),
     );
+    const subjects = buildSubjectRows(student.marks, subjectLinks, grades, isGpa);
+    const gpa = isGpa
+      ? computeGpa(
+          subjects.map((subject) => ({
+            gradePoint: subject.gradePoint,
+            creditHours: subject.creditHours,
+          })),
+        )
+      : null;
     return {
       examStudentId: student.id,
       student: student.studentEnrollment.student,
       classSection: student.studentEnrollment.classSection,
       rollNumber: student.rollNumber,
+      showOnPortal: student.showOnPortal,
       marks: student.marks,
+      subjects,
       aspects: student.aspectValues,
       maximumMarks,
       obtainedMarks,
       percentage: Number(percentage.toFixed(2)),
       grade: grade?.name ?? null,
       gradePoint: grade?.gradePoint ? Number(grade.gradePoint) : null,
+      gpa,
       passStatus:
         subjectFailed || grade?.passStatus === PassStatus.FAIL ? PassStatus.FAIL : PassStatus.PASS,
     };
   });
-  results.sort((a, b) => b.obtainedMarks - a.obtainedMarks);
+  const sortKey = isGpa ? "gpa" : "obtainedMarks";
+  results.sort((a, b) => {
+    if (sortKey === "gpa") {
+      return (b.gpa ?? 0) - (a.gpa ?? 0);
+    }
+    return b.obtainedMarks - a.obtainedMarks;
+  });
   let lastScore: number | null = null;
   let rank = 0;
   return {
     exam,
     published: exam.status === ExamStatus.PUBLISHED,
     results: results.map((result, index) => {
-      if (result.obtainedMarks !== lastScore) rank = index + 1;
-      lastScore = result.obtainedMarks;
+      const score = isGpa ? (result.gpa ?? 0) : result.obtainedMarks;
+      if (score !== lastScore) rank = index + 1;
+      lastScore = score;
       return { ...result, rank };
     }),
   };
+}
+
+function mergeExamReports(
+  examResults: Awaited<ReturnType<typeof getExamResults>>[],
+  grades: Array<{
+    name: string;
+    minPercent: { toString(): string } | number;
+    maxPercent: { toString(): string } | number;
+    gradePoint?: { toString(): string } | number | null;
+    passStatus: PassStatus;
+  }>,
+  resultType: ExamResultType,
+) {
+  const isGpa = resultType === "GPA";
+  const combined = new Map<
+    string,
+    {
+      student: (typeof examResults)[number]["results"][number]["student"];
+      classSection: (typeof examResults)[number]["results"][number]["classSection"];
+      rollNumber: string | null;
+      showOnPortal: boolean;
+      maximumMarks: number;
+      obtainedMarks: number;
+      failed: boolean;
+      gpaParts: Array<{ gpa: number | null; creditHours: number }>;
+      subjects: MarkSubjectRow[];
+      exams: Array<{
+        examId: string;
+        examName: string;
+        maximumMarks: number;
+        obtainedMarks: number;
+        percentage: number;
+        gpa: number | null;
+        passStatus: PassStatus;
+      }>;
+    }
+  >();
+  for (const report of examResults) {
+    for (const result of report.results) {
+      const current = combined.get(result.student.id) ?? {
+        student: result.student,
+        classSection: result.classSection,
+        rollNumber: result.rollNumber,
+        showOnPortal: result.showOnPortal,
+        maximumMarks: 0,
+        obtainedMarks: 0,
+        failed: false,
+        gpaParts: [] as Array<{ gpa: number | null; creditHours: number }>,
+        subjects: [] as MarkSubjectRow[],
+        exams: [] as Array<{
+          examId: string;
+          examName: string;
+          maximumMarks: number;
+          obtainedMarks: number;
+          percentage: number;
+          gpa: number | null;
+          passStatus: PassStatus;
+        }>,
+      };
+      current.maximumMarks += result.maximumMarks;
+      current.obtainedMarks += result.obtainedMarks;
+      current.failed ||= result.passStatus === PassStatus.FAIL;
+      current.showOnPortal &&= result.showOnPortal;
+      const creditHours = result.subjects.reduce(
+        (sum, subject) => sum + (subject.creditHours && subject.creditHours > 0 ? subject.creditHours : 0),
+        0,
+      );
+      current.gpaParts.push({ gpa: result.gpa, creditHours });
+      current.subjects.push(...result.subjects);
+      current.exams.push({
+        examId: report.exam.id,
+        examName: report.exam.name,
+        maximumMarks: result.maximumMarks,
+        obtainedMarks: result.obtainedMarks,
+        percentage: result.percentage,
+        gpa: result.gpa,
+        passStatus: result.passStatus,
+      });
+      combined.set(result.student.id, current);
+    }
+  }
+  const results = [...combined.values()].map((result) => {
+    const percentage = result.maximumMarks
+      ? (result.obtainedMarks / result.maximumMarks) * 100
+      : 0;
+    const grade = findGradeByPercent(grades, percentage);
+    let gpa: number | null = null;
+    if (isGpa) {
+      const fromSubjects = computeGpa(
+        result.subjects.map((subject) => ({
+          gradePoint: subject.gradePoint,
+          creditHours: subject.creditHours,
+        })),
+      );
+      if (fromSubjects != null) {
+        gpa = fromSubjects;
+      } else {
+        let weighted = 0;
+        let creditSum = 0;
+        const plain: number[] = [];
+        for (const part of result.gpaParts) {
+          if (part.gpa == null) continue;
+          plain.push(part.gpa);
+          if (part.creditHours > 0) {
+            weighted += part.gpa * part.creditHours;
+            creditSum += part.creditHours;
+          }
+        }
+        if (creditSum > 0) gpa = Number((weighted / creditSum).toFixed(2));
+        else if (plain.length > 0) {
+          gpa = Number((plain.reduce((sum, value) => sum + value, 0) / plain.length).toFixed(2));
+        }
+      }
+    }
+    return {
+      student: result.student,
+      classSection: result.classSection,
+      rollNumber: result.rollNumber,
+      showOnPortal: result.showOnPortal,
+      maximumMarks: result.maximumMarks,
+      obtainedMarks: result.obtainedMarks,
+      subjects: result.subjects,
+      exams: result.exams,
+      examStudentId: result.student.id,
+      percentage: Number(percentage.toFixed(2)),
+      grade: grade?.name ?? null,
+      gradePoint: grade?.gradePoint ? Number(grade.gradePoint) : null,
+      gpa,
+      passStatus:
+        result.failed || grade?.passStatus === PassStatus.FAIL
+          ? PassStatus.FAIL
+          : PassStatus.PASS,
+    };
+  });
+  results.sort((a, b) => {
+    if (isGpa) return (b.gpa ?? 0) - (a.gpa ?? 0);
+    return b.obtainedMarks - a.obtainedMarks;
+  });
+  let rank = 0;
+  let lastScore: number | null = null;
+  return results.map((result, index) => {
+    const score = isGpa ? (result.gpa ?? 0) : result.obtainedMarks;
+    if (score !== lastScore) rank = index + 1;
+    lastScore = score;
+    return { ...result, rank };
+  });
 }
 
 export async function getExamGroupResults(tenantId: string, groupId: string) {
@@ -783,79 +1179,114 @@ export async function getExamGroupResults(tenantId: string, groupId: string) {
       orderBy: { minPercent: "desc" },
     }),
   ]);
-  const combined = new Map<string, {
-    student: (typeof examResults)[number]["results"][number]["student"];
-    classSection: (typeof examResults)[number]["results"][number]["classSection"];
-    rollNumber: string | null;
-    maximumMarks: number;
-    obtainedMarks: number;
-    failed: boolean;
-    exams: Array<{
-      examId: string;
-      examName: string;
-      maximumMarks: number;
-      obtainedMarks: number;
-      percentage: number;
-      passStatus: PassStatus;
-    }>;
-  }>();
-  for (const report of examResults) {
-    for (const result of report.results) {
-      const current = combined.get(result.student.id) ?? {
-        student: result.student,
-        classSection: result.classSection,
-        rollNumber: result.rollNumber,
-        maximumMarks: 0,
-        obtainedMarks: 0,
-        failed: false,
-        exams: [],
-      };
-      current.maximumMarks += result.maximumMarks;
-      current.obtainedMarks += result.obtainedMarks;
-      current.failed ||= result.passStatus === PassStatus.FAIL;
-      current.exams.push({
-        examId: report.exam.id,
-        examName: report.exam.name,
-        maximumMarks: result.maximumMarks,
-        obtainedMarks: result.obtainedMarks,
-        percentage: result.percentage,
-        passStatus: result.passStatus,
-      });
-      combined.set(result.student.id, current);
-    }
-  }
-  const results = [...combined.values()].map((result) => {
-    const percentage = result.maximumMarks
-      ? (result.obtainedMarks / result.maximumMarks) * 100
-      : 0;
-    const grade = grades.find(
-      (item) => percentage >= Number(item.minPercent) && percentage <= Number(item.maxPercent),
-    );
-    return {
-      ...result,
-      examStudentId: result.student.id,
-      percentage: Number(percentage.toFixed(2)),
-      grade: grade?.name ?? null,
-      gradePoint: grade?.gradePoint ? Number(grade.gradePoint) : null,
-      passStatus:
-        result.failed || grade?.passStatus === PassStatus.FAIL
-          ? PassStatus.FAIL
-          : PassStatus.PASS,
-    };
-  });
-  results.sort((a, b) => b.obtainedMarks - a.obtainedMarks);
-  let rank = 0;
-  let lastScore: number | null = null;
   return {
     group,
-    published: group.exams.length > 0 &&
+    published:
+      group.exams.length > 0 &&
       group.exams.every((exam) => exam.status === ExamStatus.PUBLISHED),
-    results: results.map((result, index) => {
-      if (result.obtainedMarks !== lastScore) rank = index + 1;
-      lastScore = result.obtainedMarks;
-      return { ...result, rank };
-    }),
+    results: mergeExamReports(examResults, grades, group.resultType),
   };
+}
+
+export async function listExamLinks(tenantId: string) {
+  return prisma.examLink.findMany({
+    where: tenantScope(tenantId, {}),
+    orderBy: { updatedAt: "desc" },
+  });
+}
+
+export async function createExamLink(
+  tenantId: string,
+  input: { name: string; resultType: ExamResultType; examIds: string[] },
+) {
+  if (input.examIds.length < 2) {
+    throw new AppError(400, "Select at least two exams to link", "EXAM_LINK_TOO_FEW");
+  }
+  const uniqueIds = [...new Set(input.examIds)];
+  if (uniqueIds.length !== input.examIds.length) {
+    throw new AppError(400, "Exam link cannot contain duplicate exams", "EXAM_LINK_DUPLICATE");
+  }
+  const exams = await prisma.exam.findMany({
+    where: tenantScope(tenantId, { id: { in: input.examIds } }),
+    include: { examGroup: { include: { academicSession: true } } },
+  });
+  if (exams.length !== input.examIds.length) {
+    throw new AppError(400, "One or more exams were not found", "EXAM_LINK_INVALID");
+  }
+  const ordered = input.examIds.map((id) => {
+    const exam = exams.find((item) => item.id === id);
+    if (!exam) throw new AppError(400, "One or more exams were not found", "EXAM_LINK_INVALID");
+    return exam;
+  });
+  if (input.resultType === "SCHOOL_GRADING") {
+    const sessionIds = new Set(ordered.map((exam) => exam.examGroup.academicSessionId));
+    if (sessionIds.size > 1) {
+      throw new AppError(
+        400,
+        "School grading links require exams in the same academic session",
+        "EXAM_LINK_SESSION_MISMATCH",
+      );
+    }
+  }
+  const finalExamId = input.examIds[input.examIds.length - 1]!;
+  return prisma.examLink.create({
+    data: {
+      tenantId,
+      name: input.name,
+      resultType: input.resultType,
+      finalExamId,
+      examIds: input.examIds,
+    },
+  });
+}
+
+export async function deleteExamLink(tenantId: string, id: string) {
+  const existing = await prisma.examLink.findFirst({
+    where: tenantScope(tenantId, { id }),
+  });
+  if (!existing) throw new AppError(404, "Exam link not found", "EXAM_LINK_NOT_FOUND");
+  await prisma.examLink.delete({ where: { id } });
+}
+
+export async function getExamLinkResults(tenantId: string, linkId: string) {
+  const link = await prisma.examLink.findFirst({
+    where: tenantScope(tenantId, { id: linkId }),
+  });
+  if (!link) throw new AppError(404, "Exam link not found", "EXAM_LINK_NOT_FOUND");
+  const examIds = Array.isArray(link.examIds) ? (link.examIds as string[]) : [];
+  if (examIds.length === 0) {
+    throw new AppError(400, "Exam link has no exams", "EXAM_LINK_EMPTY");
+  }
+  const [examResults, grades] = await Promise.all([
+    Promise.all(examIds.map((examId) => getExamResults(tenantId, examId))),
+    prisma.examGrade.findMany({
+      where: tenantScope(tenantId, { resultType: link.resultType }),
+      orderBy: { minPercent: "desc" },
+    }),
+  ]);
+  const ordered = examIds
+    .map((examId) => examResults.find((report) => report.exam.id === examId))
+    .filter((report): report is NonNullable<typeof report> => Boolean(report));
+  return {
+    link,
+    published: ordered.every((report) => report.published),
+    results: mergeExamReports(ordered, grades, link.resultType),
+  };
+}
+
+export async function updateExamStudentPortalVisibility(
+  tenantId: string,
+  examStudentId: string,
+  showOnPortal: boolean,
+) {
+  const existing = await prisma.examStudent.findFirst({
+    where: tenantScope(tenantId, { id: examStudentId }),
+  });
+  if (!existing) throw new AppError(404, "Exam student not found", "EXAM_STUDENT_NOT_FOUND");
+  return prisma.examStudent.update({
+    where: { id: examStudentId },
+    data: { showOnPortal },
+  });
 }
 
 export async function updateExamGrade(
@@ -936,7 +1367,7 @@ export async function deleteExamGroup(tenantId: string, id: string) {
 export async function updateExam(
   tenantId: string,
   id: string,
-  input: { name?: string; startDate?: Date; endDate?: Date },
+  input: { name?: string; startDate?: Date; endDate?: Date; description?: string | null },
 ) {
   const exam = await requireExam(tenantId, id);
   if ((exam.status as string) === "ARCHIVED") {
@@ -951,6 +1382,7 @@ export async function updateExam(
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
       ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
+      ...(input.description !== undefined ? { description: input.description } : {}),
     },
     include: examInclude,
   });
@@ -984,6 +1416,7 @@ export async function updateExamSchedule(
     room?: string | null;
     maximumMarks?: number;
     minimumMarks?: number;
+    creditHours?: number | null;
   },
 ) {
   const schedule = await prisma.examSchedule.findFirst({
@@ -1003,6 +1436,7 @@ export async function updateExamSchedule(
       ...(input.room !== undefined ? { room: input.room } : {}),
       ...(input.maximumMarks !== undefined ? { maximumMarks: input.maximumMarks } : {}),
       ...(input.minimumMarks !== undefined ? { minimumMarks: input.minimumMarks } : {}),
+      ...(input.creditHours !== undefined ? { creditHours: input.creditHours } : {}),
     },
   });
 }

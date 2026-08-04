@@ -173,18 +173,23 @@ import {
   createExamController,
   createExamGradeController,
   createExamGroupController,
+  createExamLinkController,
   createExamScheduleController,
   deleteExamAspectController,
   deleteExamController,
   deleteExamGradeController,
   deleteExamGroupController,
+  deleteExamLinkController,
   deleteExamScheduleController,
   deleteExamSubjectLinkController,
   deleteMarkComponentController,
   getExamResultsController,
   getExamGroupResultsController,
+  getExamLinkResultsController,
   getExamSetupController,
   getScheduleRosterController,
+  listExamLinksController,
+  listExamStudentsController,
   listExamSubjectLinksController,
   publishExamController,
   unpublishExamController,
@@ -197,11 +202,13 @@ import {
   updateExamGradeController,
   updateExamGroupController,
   updateExamScheduleController,
+  updateExamStudentPortalVisibilityController,
   updateMarkComponentController,
 } from "../../modules/exams/exams.controller.js";
 import {
   addStaffAdjustmentController,
   addTeacherRatingController,
+  applyOwnStaffLeaveController,
   applyStaffLeaveController,
   createDepartmentController,
   createDesignationController,
@@ -209,9 +216,12 @@ import {
   createStaffProfileController,
   generatePayrollController,
   getHrSetupController,
+  getPayrollPayslipController,
   getStaffAttendanceReportController,
+  getStaffDetailController,
   getStaffLeaveController,
   getTeacherRatingsSummaryController,
+  listDisabledStaffController,
   markStaffAttendanceController,
   payPayrollController,
   revertPayrollController,
@@ -219,11 +229,14 @@ import {
   deleteDepartmentController,
   deleteDesignationController,
   deletePayParameterController,
+  deleteStaffAdjustmentController,
   deleteStaffLeaveTypeController,
+  deleteStaffProfileController,
   reviewStaffLeaveController,
   updateDepartmentController,
   updateDesignationController,
   updatePayParameterController,
+  updateStaffAdjustmentController,
   updateStaffLeaveTypeController,
   updateStaffProfileController,
   updateStaffStatusController,
@@ -232,6 +245,7 @@ import {
   createDocumentTemplateController,
   deleteDocumentTemplateController,
   generateDocumentController,
+  generateDocumentsBulkController,
   getGeneratedDocumentController,
   listDocumentTemplatesController,
   listGeneratedDocumentsController,
@@ -255,6 +269,7 @@ import {
   createHomeworkController,
   evaluateHomeworkSubmissionController,
   getHomeworkController,
+  getHomeworkNamedReportController,
   getHomeworkReportController,
   getHomeworkSetupController,
   getHomeworkSubmissionsController,
@@ -1059,6 +1074,31 @@ campusRouter.post(
   requirePermission("exams.manage"),
   asyncHandler(createExamController),
 );
+campusRouter.get(
+  "/exams/links",
+  requirePermission("exams.view"),
+  asyncHandler(listExamLinksController),
+);
+campusRouter.post(
+  "/exams/links",
+  requirePermission("exams.manage"),
+  asyncHandler(createExamLinkController),
+);
+campusRouter.delete(
+  "/exams/links/:id",
+  requirePermission("exams.manage"),
+  asyncHandler(deleteExamLinkController),
+);
+campusRouter.get(
+  "/exams/links/:id/results",
+  requirePermission("exams.view"),
+  asyncHandler(getExamLinkResultsController),
+);
+campusRouter.put(
+  "/exams/students/:id/portal-visibility",
+  requirePermission("exams.manage"),
+  asyncHandler(updateExamStudentPortalVisibilityController),
+);
 campusRouter.put(
   "/exams/:id",
   requirePermission("exams.manage"),
@@ -1088,6 +1128,11 @@ campusRouter.delete(
   "/exams/schedules/:id",
   requirePermission("exams.manage"),
   asyncHandler(deleteExamScheduleController),
+);
+campusRouter.get(
+  "/exams/:id/students",
+  requirePermission("exams.view"),
+  asyncHandler(listExamStudentsController),
 );
 campusRouter.post(
   "/exams/:id/students",
@@ -1269,11 +1314,29 @@ campusRouter.post(
   requirePermission("hr.manage"),
   asyncHandler(createStaffProfileController),
 );
+campusRouter.get(
+  "/hr/staff/disabled",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(listDisabledStaffController),
+);
+campusRouter.get(
+  "/hr/staff/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(getStaffDetailController),
+);
 campusRouter.put(
   "/hr/staff/:id",
   requireEntitlement("CMS"),
   requirePermission("hr.manage"),
   asyncHandler(updateStaffProfileController),
+);
+campusRouter.delete(
+  "/hr/staff/:id",
+  requireEntitlement("CMS"),
+  requirePermission("hr.manage"),
+  asyncHandler(deleteStaffProfileController),
 );
 campusRouter.put(
   "/hr/staff/:id/status",
@@ -1299,6 +1362,12 @@ campusRouter.post(
   requirePermission("hr.manage"),
   asyncHandler(applyStaffLeaveController),
 );
+campusRouter.post(
+  "/hr/leaves/mine",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(applyOwnStaffLeaveController),
+);
 campusRouter.get(
   "/hr/leaves/:id",
   requireEntitlement("CMS"),
@@ -1317,11 +1386,29 @@ campusRouter.post(
   requirePermission("payroll.manage"),
   asyncHandler(addStaffAdjustmentController),
 );
+campusRouter.put(
+  "/hr/adjustments/:id",
+  requireEntitlement("CMS"),
+  requirePermission("payroll.manage"),
+  asyncHandler(updateStaffAdjustmentController),
+);
+campusRouter.delete(
+  "/hr/adjustments/:id",
+  requireEntitlement("CMS"),
+  requirePermission("payroll.manage"),
+  asyncHandler(deleteStaffAdjustmentController),
+);
 campusRouter.post(
   "/hr/payroll",
   requireEntitlement("CMS"),
   requirePermission("payroll.manage"),
   asyncHandler(generatePayrollController),
+);
+campusRouter.get(
+  "/hr/payroll/:id/payslip",
+  requireEntitlement("CMS"),
+  requirePermission("hr.view"),
+  asyncHandler(getPayrollPayslipController),
 );
 campusRouter.put(
   "/hr/payroll/:id/pay",
@@ -1377,6 +1464,11 @@ campusRouter.get(
   "/documents/generated/:id",
   requirePermission("documents.view"),
   asyncHandler(getGeneratedDocumentController),
+);
+campusRouter.post(
+  "/documents/generated/bulk",
+  requirePermission("documents.generate"),
+  asyncHandler(generateDocumentsBulkController),
 );
 campusRouter.post(
   "/documents/generated",
@@ -1475,6 +1567,16 @@ campusRouter.get(
   "/homework-reports",
   requirePermission("homework.evaluate"),
   asyncHandler(getHomeworkReportController),
+);
+campusRouter.get(
+  "/homework-reports/:reportKey",
+  requirePermission("homework.evaluate"),
+  asyncHandler(getHomeworkNamedReportController),
+);
+campusRouter.get(
+  "/reports/homework/:reportKey",
+  requirePermission("reports.view"),
+  asyncHandler(getHomeworkNamedReportController),
 );
 
 campusRouter.get(

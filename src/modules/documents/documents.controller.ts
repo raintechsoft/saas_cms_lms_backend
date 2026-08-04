@@ -5,6 +5,7 @@ import {
   createDocumentTemplate,
   deleteDocumentTemplate,
   generateDocument,
+  generateDocumentsBulk,
   getGeneratedDocument,
   listDocumentTemplates,
   listGeneratedDocuments,
@@ -45,6 +46,17 @@ const generateBody = z.object({
   barcodeValue: z.string().trim().max(200).nullable().optional(),
   payload: z.record(z.string(), z.unknown()).optional(),
 });
+const bulkGenerateBody = z
+  .object({
+    templateId: z.string().min(1),
+    examId: z.string().min(1),
+    studentIds: z.array(z.string().min(1)).max(150).optional(),
+    classSectionId: z.string().min(1).optional(),
+  })
+  .refine(
+    (value) => !value.studentIds || value.studentIds.length > 0 || Boolean(value.classSectionId),
+    { message: "Provide studentIds or classSectionId" },
+  );
 const generatedQuery = z.object({
   type: z.nativeEnum(DocumentTemplateType).optional(),
   studentId: z.string().min(1).optional(),
@@ -89,6 +101,13 @@ export async function generateDocumentController(req: Request, res: Response) {
       ...body,
       payload: body.payload as Prisma.InputJsonValue | undefined,
     }),
+  });
+}
+
+export async function generateDocumentsBulkController(req: Request, res: Response) {
+  const body = bulkGenerateBody.parse(req.body);
+  res.status(201).json({
+    data: await generateDocumentsBulk(req.auth!.tenantId!, req.auth!.userId, body),
   });
 }
 

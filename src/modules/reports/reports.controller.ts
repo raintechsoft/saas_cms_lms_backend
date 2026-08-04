@@ -163,7 +163,7 @@ export async function runModuleReportController(req: Request, res: Response) {
       "ENTITLEMENT_REQUIRED",
     );
   }
-  if (mode === "CMS" && ["timetable", "homework"].includes(module)) {
+  if (mode === "CMS" && ["timetable"].includes(module)) {
     throw new AppError(
       403,
       "This report requires LMS entitlement",
