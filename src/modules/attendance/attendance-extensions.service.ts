@@ -18,7 +18,9 @@ export type AttendancePackReportKey =
   | "staff_summary"
   | "inout_time"
   | "period_wise"
-  | "class_wise";
+  | "class_wise"
+  | "frequently_absent"
+  | "attendance_type";
 
 export const ATTENDANCE_REPORTS: Array<{
   key: AttendancePackReportKey;
@@ -64,6 +66,16 @@ export const ATTENDANCE_REPORTS: Array<{
     key: "class_wise",
     label: "Class wise Attendance Report",
     description: "Aggregated attendance per class section",
+  },
+  {
+    key: "frequently_absent",
+    label: "Frequently Absent Report",
+    description: "Students with absent/late/half-day count above threshold in date range",
+  },
+  {
+    key: "attendance_type",
+    label: "Attendance Type Report",
+    description: "Status distribution by day-wise or period-wise attendance mode",
   },
 ];
 
@@ -651,6 +663,138 @@ export async function runAttendancePackReport(
       fromDate,
       toDate,
       summary: { periods: rows.length, total: records.length },
+      rows,
+    };
+  }
+
+  if (query.reportKey === "frequently_absent") {
+    const threshold = query.threshold ?? 3;
+    const toDate = query.toDate ?? query.date ?? new Date();
+    const fromDate =
+      query.fromDate ??
+      query.date ??
+      (() => {
+        const d = new Date(toDate);
+        d.setUTCDate(d.getUTCDate() - 6);
+        return d;
+      })();
+    const records = await prisma.attendanceRecord.findMany({
+      where: tenantScope(tenantId, {
+        ...(currentSession ? { academicSessionId: currentSession.id } : {}),
+        attendanceDate: { gte: fromDate, lte: toDate },
+        status: {
+          in: [AttendanceStatus.ABSENT, AttendanceStatus.LATE, AttendanceStatus.HALF_DAY],
+        },
+        ...(query.classSectionId ? { classSectionId: query.classSectionId } : {}),
+        ...(query.periodKey ? { periodKey: query.periodKey } : {}),
+      }),
+      include: recordInclude,
+    });
+    const byEnrollment = new Map<
+      string,
+      {
+        studentName: string;
+        admissionNumber: string;
+        classSection: string;
+        absent: number;
+        late: number;
+        halfDay: number;
+        totalIssues: number;
+      }
+    >();
+    for (const record of records) {
+      const key = record.studentEnrollmentId;
+      const row = byEnrollment.get(key) ?? {
+        studentName: studentDisplayName(record.studentEnrollment.student),
+        admissionNumber: record.studentEnrollment.student.admissionNumber,
+        classSection: classSectionLabel(record.studentEnrollment.classSection),
+        absent: 0,
+        late: 0,
+        halfDay: 0,
+        totalIssues: 0,
+      };
+      if (record.status === AttendanceStatus.ABSENT) row.absent += 1;
+      if (record.status === AttendanceStatus.LATE) row.late += 1;
+      if (record.status === AttendanceStatus.HALF_DAY) row.halfDay += 1;
+      row.totalIssues = row.absent + row.late + row.halfDay;
+      byEnrollment.set(key, row);
+    }
+    const rows = [...byEnrollment.values()]
+      .filter((row) => row.totalIssues >= threshold)
+      .sort((a, b) => b.totalIssues - a.totalIssues);
+    return {
+      reportKey: query.reportKey,
+      title: reportMeta.label,
+      session: currentSession,
+      fromDate,
+      toDate,
+      summary: { students: rows.length, threshold },
+      rows,
+    };
+  }
+
+  if (query.reportKey === "attendance_type") {
+    const fromDate = query.fromDate ?? query.date ?? currentSession?.startDate;
+    const toDate = query.toDate ?? query.date ?? currentSession?.endDate ?? new Date();
+    if (!fromDate) {
+      throw new AppError(400, "Date range is required", "DATE_RANGE_REQUIRED");
+    }
+    const records = await prisma.attendanceRecord.findMany({
+      where: tenantScope(tenantId, {
+        ...(currentSession ? { academicSessionId: currentSession.id } : {}),
+        attendanceDate: { gte: fromDate, lte: toDate },
+        ...(query.classSectionId ? { classSectionId: query.classSectionId } : {}),
+      }),
+      select: { status: true, periodKey: true, attendanceDate: true },
+    });
+    const attendanceMode = setting?.attendanceType ?? AttendanceType.DAY_WISE;
+    const isPeriodWise = attendanceMode === AttendanceType.PERIOD_WISE;
+    const byBucket = new Map<
+      string,
+      {
+        bucket: string;
+        present: number;
+        late: number;
+        absent: number;
+        halfDay: number;
+        holiday: number;
+        total: number;
+      }
+    >();
+    for (const record of records) {
+      const bucket = isPeriodWise
+        ? record.periodKey
+        : record.attendanceDate.toISOString().slice(0, 10);
+      const row = byBucket.get(bucket) ?? {
+        bucket,
+        present: 0,
+        late: 0,
+        absent: 0,
+        halfDay: 0,
+        holiday: 0,
+        total: 0,
+      };
+      row.total += 1;
+      if (record.status === AttendanceStatus.PRESENT) row.present += 1;
+      if (record.status === AttendanceStatus.LATE) row.late += 1;
+      if (record.status === AttendanceStatus.ABSENT) row.absent += 1;
+      if (record.status === AttendanceStatus.HALF_DAY) row.halfDay += 1;
+      if (record.status === AttendanceStatus.HOLIDAY) row.holiday += 1;
+      byBucket.set(bucket, row);
+    }
+    const statusTotals = records.reduce<Record<string, number>>((acc, record) => {
+      acc[record.status] = (acc[record.status] ?? 0) + 1;
+      return acc;
+    }, {});
+    const rows = [...byBucket.values()].sort((a, b) => a.bucket.localeCompare(b.bucket));
+    return {
+      reportKey: query.reportKey,
+      title: reportMeta.label,
+      session: currentSession,
+      fromDate,
+      toDate,
+      attendanceMode,
+      summary: { total: records.length, buckets: rows.length, ...statusTotals },
       rows,
     };
   }

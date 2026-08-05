@@ -254,6 +254,7 @@ import {
 import {
   getReportHubController,
   runCoreReportController,
+  runExtraReportController,
   runFeeReportController,
   runModuleReportController,
   runStudentReportController,
@@ -1495,6 +1496,11 @@ campusRouter.get(
   "/reports/fee/:reportKey",
   requirePermission("reports.view"),
   asyncHandler(runFeeReportController),
+);
+campusRouter.get(
+  "/reports/extra/:reportKey",
+  requirePermission("reports.view"),
+  asyncHandler(runExtraReportController),
 );
 campusRouter.get(
   "/reports/:module",

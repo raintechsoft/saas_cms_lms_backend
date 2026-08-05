@@ -23,6 +23,8 @@ export type FeeReportKey =
   | "balance_fee"
   | "parents_wise_due"
   | "students_wise_fee"
+  | "fee_statement"
+  | "previous_session_fees"
   | "fine_report"
   | "discount_report"
   | "online_fee"
@@ -43,6 +45,8 @@ export const FEE_REPORTS: Array<{
   { key: "balance_fee", label: "Balance Fee Report", description: "Fee-head wise outstanding balances" },
   { key: "parents_wise_due", label: "Parents wise Due Report", description: "Outstanding dues grouped by parent/guardian contact" },
   { key: "students_wise_fee", label: "Students wise Fee Report", description: "Student-wise assigned, paid, discount, fine and balance" },
+  { key: "fee_statement", label: "Fee Statement Report", description: "Student-wise fee statement with assigned, paid, balance and fine" },
+  { key: "previous_session_fees", label: "Previous Session Fees Report", description: "Carry-forward and pending fees from prior sessions" },
   { key: "fine_report", label: "Fine Report", description: "Fine amounts applied on fee assignments" },
   { key: "discount_report", label: "Discount Report", description: "Discounts applied on student fee assignments" },
   { key: "online_fee", label: "Online Fee Report", description: "Payments collected with ONLINE payment mode" },
@@ -227,6 +231,161 @@ async function loadAssignmentDues(
   });
 }
 
+function aggregateStudentFeeRows(dues: AssignmentDueRow[]) {
+  const byStudent = new Map<
+    string,
+    {
+      admissionNumber: string;
+      studentName: string;
+      classSection: string;
+      assigned: number;
+      discount: number;
+      fine: number;
+      paid: number;
+      balance: number;
+      feeHeads: number;
+    }
+  >();
+  for (const row of dues) {
+    const existing = byStudent.get(row.studentId) ?? {
+      admissionNumber: row.admissionNumber,
+      studentName: row.studentName,
+      classSection: row.classSection,
+      assigned: 0,
+      discount: 0,
+      fine: 0,
+      paid: 0,
+      balance: 0,
+      feeHeads: 0,
+    };
+    existing.assigned += row.base;
+    existing.discount += row.discount;
+    existing.fine += row.fine;
+    existing.paid += row.paid;
+    existing.balance += row.balance;
+    existing.feeHeads += 1;
+    byStudent.set(row.studentId, existing);
+  }
+  return [...byStudent.values()]
+    .map((row) => ({
+      admissionNumber: row.admissionNumber,
+      studentName: row.studentName,
+      classSection: row.classSection,
+      feeHeads: row.feeHeads,
+      assigned: Number(row.assigned.toFixed(2)),
+      discount: Number(row.discount.toFixed(2)),
+      fine: Number(row.fine.toFixed(2)),
+      paid: Number(row.paid.toFixed(2)),
+      balance: Number(row.balance.toFixed(2)),
+    }))
+    .sort((a, b) => a.studentName.localeCompare(b.studentName));
+}
+
+async function loadPreviousSessionFeeRows(
+  tenantId: string,
+  currentSessionId: string,
+  asOf: Date,
+  classSectionId?: string,
+) {
+  const assignments = await prisma.studentFeeAssignment.findMany({
+    where: tenantScope(tenantId, {
+      status: FeeAssignmentStatus.ACTIVE,
+      OR: [
+        {
+          carryForwardAmount: { gt: 0 },
+          studentEnrollment: {
+            academicSessionId: currentSessionId,
+            status: EnrollmentStatus.ACTIVE,
+            ...(classSectionId ? { classSectionId } : {}),
+            student: { status: StudentStatus.ACTIVE },
+          },
+        },
+        {
+          studentEnrollment: {
+            academicSessionId: { not: currentSessionId },
+            status: EnrollmentStatus.ACTIVE,
+            ...(classSectionId ? { classSectionId } : {}),
+            student: { status: StudentStatus.ACTIVE },
+          },
+        },
+      ],
+    }),
+    include: {
+      feeMaster: {
+        include: {
+          feeType: true,
+          feeGroup: true,
+          fineRanges: { orderBy: { startDate: "asc" } },
+        },
+      },
+      discount: true,
+      paymentItems: {
+        where: { payment: { status: PaymentStatus.COLLECTED } },
+        include: { payment: true },
+      },
+      studentEnrollment: {
+        include: {
+          student: true,
+          academicSession: { select: { id: true, name: true } },
+          classSection: { include: { academicClass: true, section: true } },
+        },
+      },
+    },
+  });
+
+  return assignments
+    .map((assignment) => {
+      const base =
+        money(assignment.customAmount ?? assignment.feeMaster.amount) +
+        money(assignment.carryForwardAmount);
+      const discount = calculateDiscount(
+        assignment.discount?.type,
+        assignment.discount?.value,
+        base,
+      );
+      const fine = calculateFine(
+        assignment.feeMaster.fineType,
+        assignment.feeMaster.fineValue,
+        base,
+        assignment.feeMaster.dueDate,
+        assignment.feeMaster.graceDays,
+        asOf,
+        assignment.feeMaster.fineRanges,
+      );
+      const paid = assignment.paymentItems.reduce(
+        (sum, item) => sum + money(item.paidAmount),
+        0,
+      );
+      const balance = Math.max(0, base - discount + fine - paid);
+      const student = assignment.studentEnrollment.student;
+      const isCurrentSession =
+        assignment.studentEnrollment.academicSessionId === currentSessionId;
+      const carryForward = money(assignment.carryForwardAmount);
+      const include =
+        (isCurrentSession && carryForward > 0) ||
+        (!isCurrentSession && balance >= 0.01);
+      if (!include) return null;
+      return {
+        assignmentId: assignment.id,
+        studentId: student.id,
+        admissionNumber: student.admissionNumber,
+        studentName: nameOf(student.firstName, student.lastName),
+        sessionName: assignment.studentEnrollment.academicSession.name,
+        isCurrentSession,
+        classSection: `${assignment.studentEnrollment.classSection.academicClass.name} · ${assignment.studentEnrollment.classSection.section.name}`,
+        feeType: assignment.feeMaster.feeType.name,
+        feeGroup: assignment.feeMaster.feeGroup.name,
+        dueDate: assignment.feeMaster.dueDate.toISOString().slice(0, 10),
+        carryForward: Number(carryForward.toFixed(2)),
+        assigned: Number(base.toFixed(2)),
+        paid: Number(paid.toFixed(2)),
+        balance: Number(balance.toFixed(2)),
+        fine: Number(fine.toFixed(2)),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row != null);
+}
+
 export async function runFeeReport(
   tenantId: string,
   reportKey: FeeReportKey,
@@ -359,66 +518,84 @@ export async function runFeeReport(
     };
   }
 
-  if (reportKey === "students_wise_fee") {
+  if (reportKey === "students_wise_fee" || reportKey === "fee_statement") {
     const dues = await loadAssignmentDues(tenantId, session.id, asOf, query.classSectionId);
-    const byStudent = new Map<
-      string,
-      {
-        admissionNumber: string;
-        studentName: string;
-        classSection: string;
-        assigned: number;
-        discount: number;
-        fine: number;
-        paid: number;
-        balance: number;
-        feeHeads: number;
-      }
-    >();
-    for (const row of dues) {
-      const existing = byStudent.get(row.studentId) ?? {
-        admissionNumber: row.admissionNumber,
-        studentName: row.studentName,
-        classSection: row.classSection,
-        assigned: 0,
-        discount: 0,
-        fine: 0,
-        paid: 0,
-        balance: 0,
-        feeHeads: 0,
-      };
-      existing.assigned += row.base;
-      existing.discount += row.discount;
-      existing.fine += row.fine;
-      existing.paid += row.paid;
-      existing.balance += row.balance;
-      existing.feeHeads += 1;
-      byStudent.set(row.studentId, existing);
-    }
-    const rows = [...byStudent.values()]
-      .map((row) => ({
-        admissionNumber: row.admissionNumber,
-        studentName: row.studentName,
-        classSection: row.classSection,
-        feeHeads: row.feeHeads,
-        assigned: Number(row.assigned.toFixed(2)),
-        discount: Number(row.discount.toFixed(2)),
-        fine: Number(row.fine.toFixed(2)),
-        paid: Number(row.paid.toFixed(2)),
-        balance: Number(row.balance.toFixed(2)),
-      }))
-      .sort((a, b) => a.studentName.localeCompare(b.studentName));
+    const rows = aggregateStudentFeeRows(dues);
     return {
       reportKey,
-      title: "Students wise Fee Report",
+      title:
+        reportKey === "fee_statement" ? "Fee Statement Report" : "Students wise Fee Report",
       session,
       summary: {
         students: rows.length,
         assigned: Number(rows.reduce((s, r) => s + r.assigned, 0).toFixed(2)),
         paid: Number(rows.reduce((s, r) => s + r.paid, 0).toFixed(2)),
         balance: Number(rows.reduce((s, r) => s + r.balance, 0).toFixed(2)),
+        fine: Number(rows.reduce((s, r) => s + r.fine, 0).toFixed(2)),
       },
       rows,
+    };
+  }
+
+  if (reportKey === "previous_session_fees") {
+    const rows = await loadPreviousSessionFeeRows(
+      tenantId,
+      session.id,
+      asOf,
+      query.classSectionId,
+    );
+    const byStudent = new Map<
+      string,
+      {
+        admissionNumber: string;
+        studentName: string;
+        classSection: string;
+        carryForward: number;
+        balance: number;
+        priorSessionBalance: number;
+        sessions: Set<string>;
+      }
+    >();
+    for (const row of rows) {
+      const existing = byStudent.get(row.studentId) ?? {
+        admissionNumber: row.admissionNumber,
+        studentName: row.studentName,
+        classSection: row.classSection,
+        carryForward: 0,
+        balance: 0,
+        priorSessionBalance: 0,
+        sessions: new Set<string>(),
+      };
+      existing.carryForward += row.carryForward;
+      existing.balance += row.balance;
+      if (!row.isCurrentSession) existing.priorSessionBalance += row.balance;
+      existing.sessions.add(row.sessionName);
+      byStudent.set(row.studentId, existing);
+    }
+    const studentRows = [...byStudent.values()]
+      .map((row) => ({
+        admissionNumber: row.admissionNumber,
+        studentName: row.studentName,
+        classSection: row.classSection,
+        carryForward: Number(row.carryForward.toFixed(2)),
+        priorSessionBalance: Number(row.priorSessionBalance.toFixed(2)),
+        totalBalance: Number(row.balance.toFixed(2)),
+        sessions: [...row.sessions].join(", "),
+      }))
+      .sort((a, b) => b.totalBalance - a.totalBalance);
+    return {
+      reportKey,
+      title: "Previous Session Fees Report",
+      session,
+      summary: {
+        students: studentRows.length,
+        totalBalance: Number(
+          studentRows.reduce((sum, row) => sum + row.totalBalance, 0).toFixed(2),
+        ),
+        asOf: asOf.toISOString().slice(0, 10),
+      },
+      rows: studentRows,
+      detailRows: rows,
     };
   }
 

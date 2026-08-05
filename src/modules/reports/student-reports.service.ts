@@ -20,6 +20,8 @@ export type StudentReportKey =
   | "student_siblings"
   | "student_guardian"
   | "student_teacher"
+  | "student_headcounts"
+  | "class_subject"
   | "online_admissions"
   | "at_school_admissions";
 
@@ -92,6 +94,16 @@ export const STUDENT_REPORTS: Array<{
     key: "student_teacher",
     label: "Student Teacher Report",
     description: "Class teacher and subject teachers per student",
+  },
+  {
+    key: "student_headcounts",
+    label: "Student Headcounts Report",
+    description: "Per class-section totals by gender, active and disabled counts",
+  },
+  {
+    key: "class_subject",
+    label: "Class Subject Report",
+    description: "Class-section subjects with assigned teachers",
   },
   {
     key: "online_admissions",
@@ -172,6 +184,153 @@ export async function runStudentReport(
   const session = await resolveSession(tenantId, query.sessionId);
   const from = query.from;
   const to = query.to;
+
+  if (reportKey === "student_headcounts") {
+    if (!session) {
+      return {
+        reportKey,
+        title: "Student Headcounts Report",
+        session: null,
+        summary: { total: 0, classSections: 0 },
+        rows: [],
+      };
+    }
+    const [enrollments, disabledEnrollments] = await Promise.all([
+      prisma.studentEnrollment.findMany({
+        where: tenantScope(tenantId, {
+          academicSessionId: session.id,
+          status: EnrollmentStatus.ACTIVE,
+          ...(query.classSectionId ? { classSectionId: query.classSectionId } : {}),
+        }),
+        include: {
+          student: { select: { gender: true, status: true } },
+          classSection: {
+            include: { academicClass: { select: { name: true } }, section: { select: { name: true } } },
+          },
+        },
+      }),
+      prisma.studentEnrollment.findMany({
+        where: tenantScope(tenantId, {
+          academicSessionId: session.id,
+          student: { status: StudentStatus.DISABLED },
+          ...(query.classSectionId ? { classSectionId: query.classSectionId } : {}),
+        }),
+        include: {
+          student: { select: { id: true } },
+          classSection: {
+            include: { academicClass: { select: { name: true } }, section: { select: { name: true } } },
+          },
+        },
+      }),
+    ]);
+    type HeadcountRow = {
+      classSectionId: string;
+      classLabel: string;
+      total: number;
+      boys: number;
+      girls: number;
+      other: number;
+      active: number;
+      disabled: number;
+    };
+    const bySection = new Map<string, HeadcountRow>();
+    for (const enrollment of enrollments) {
+      const key = enrollment.classSectionId;
+      const row = bySection.get(key) ?? {
+        classSectionId: key,
+        classLabel: classLabel(enrollment) ?? "—",
+        total: 0,
+        boys: 0,
+        girls: 0,
+        other: 0,
+        active: 0,
+        disabled: 0,
+      };
+      row.total += 1;
+      if (enrollment.student.status === StudentStatus.ACTIVE) row.active += 1;
+      if (enrollment.student.gender === "MALE") row.boys += 1;
+      else if (enrollment.student.gender === "FEMALE") row.girls += 1;
+      else row.other += 1;
+      bySection.set(key, row);
+    }
+    const disabledBySection = new Map<string, Set<string>>();
+    for (const enrollment of disabledEnrollments) {
+      const seen = disabledBySection.get(enrollment.classSectionId) ?? new Set<string>();
+      seen.add(enrollment.student.id);
+      disabledBySection.set(enrollment.classSectionId, seen);
+    }
+    for (const [sectionId, studentIds] of disabledBySection) {
+      const row = bySection.get(sectionId);
+      if (row) {
+        row.disabled = studentIds.size;
+      } else {
+        const sample = disabledEnrollments.find((e) => e.classSectionId === sectionId);
+        bySection.set(sectionId, {
+          classSectionId: sectionId,
+          classLabel: sample ? (classLabel(sample) ?? "—") : sectionId,
+          total: 0,
+          boys: 0,
+          girls: 0,
+          other: 0,
+          active: 0,
+          disabled: studentIds.size,
+        });
+      }
+    }
+    const rows = [...bySection.values()].sort((a, b) => a.classLabel.localeCompare(b.classLabel));
+    return {
+      reportKey,
+      title: "Student Headcounts Report",
+      session,
+      summary: {
+        classSections: rows.length,
+        total: rows.reduce((sum, row) => sum + row.total, 0),
+        active: rows.reduce((sum, row) => sum + row.active, 0),
+        disabled: rows.reduce((sum, row) => sum + row.disabled, 0),
+      },
+      rows,
+    };
+  }
+
+  if (reportKey === "class_subject") {
+    const classSubjects = await prisma.classSubject.findMany({
+      where: tenantScope(tenantId, {
+        classSection: {
+          ...(session ? { academicSessionId: session.id } : {}),
+          ...(query.classSectionId ? { id: query.classSectionId } : {}),
+        },
+      }),
+      include: {
+        classSection: {
+          include: { academicClass: { select: { name: true } }, section: { select: { name: true } } },
+        },
+        subject: { select: { name: true, code: true } },
+        teacher: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: [
+        { classSection: { academicClass: { sortOrder: "asc" } } },
+        { classSection: { section: { name: "asc" } } },
+        { subject: { name: "asc" } },
+      ],
+      take: 2000,
+    });
+    return {
+      reportKey,
+      title: "Class Subject Report",
+      session,
+      summary: { total: classSubjects.length },
+      rows: classSubjects.map((item) => ({
+        id: item.id,
+        classLabel: classLabel({ classSection: item.classSection }),
+        classSectionId: item.classSectionId,
+        subject: item.subject.name,
+        subjectCode: item.subject.code,
+        teacherName: item.teacher
+          ? nameOf(item.teacher.firstName, item.teacher.lastName)
+          : null,
+      })),
+    };
+  }
 
   if (reportKey === "online_admissions") {
     const apps = await prisma.onlineAdmissionApplication.findMany({
@@ -509,6 +668,27 @@ export async function runStudentReport(
   }
 
   if (reportKey === "student_teacher") {
+    const sectionStats = new Map<
+      string,
+      { studentCount: number; teacherIds: Set<string> }
+    >();
+    for (const student of students) {
+      const enrollment = student.enrollments[0];
+      if (!enrollment) continue;
+      const sectionId = enrollment.classSectionId;
+      const stats = sectionStats.get(sectionId) ?? {
+        studentCount: 0,
+        teacherIds: new Set<string>(),
+      };
+      stats.studentCount += 1;
+      if (enrollment.classSection.classTeacherId) {
+        stats.teacherIds.add(enrollment.classSection.classTeacherId);
+      }
+      for (const subject of enrollment.classSection.subjects) {
+        if (subject.teacherId) stats.teacherIds.add(subject.teacherId);
+      }
+      sectionStats.set(sectionId, stats);
+    }
     return {
       reportKey,
       title,
@@ -529,6 +709,9 @@ export async function runStudentReport(
               `${s.subject.name}: ${nameOf(s.teacher!.firstName, s.teacher!.lastName)}`,
           )
           .join("; ");
+        const stats = enrollment ? sectionStats.get(enrollment.classSectionId) : null;
+        const studentCount = stats?.studentCount ?? 0;
+        const teacherCount = stats?.teacherIds.size ?? 0;
         return {
           id: student.id,
           admissionNumber: student.admissionNumber,
@@ -536,6 +719,10 @@ export async function runStudentReport(
           classLabel: classLabel(enrollment),
           classTeacher,
           subjectTeachers: subjectTeachers || null,
+          studentCount,
+          teacherCount,
+          studentTeacherRatio:
+            teacherCount > 0 ? Number((studentCount / teacherCount).toFixed(2)) : null,
         };
       }),
     };

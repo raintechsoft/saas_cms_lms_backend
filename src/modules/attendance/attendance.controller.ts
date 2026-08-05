@@ -102,6 +102,8 @@ const packReportQuery = z.object({
     "inout_time",
     "period_wise",
     "class_wise",
+    "frequently_absent",
+    "attendance_type",
   ]),
   date: z.coerce.date().optional(),
   fromDate: z.coerce.date().optional(),

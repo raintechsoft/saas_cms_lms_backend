@@ -18,6 +18,14 @@ import { getExamResults } from "../exams/exams.service.js";
 import { getHomeworkReport, HOMEWORK_REPORTS } from "../homework/homework.service.js";
 import { FEE_REPORTS } from "./fee-reports.service.js";
 import { STUDENT_REPORTS } from "./student-reports.service.js";
+import { ATTENDANCE_REPORTS } from "../attendance/attendance-extensions.service.js";
+import {
+  getExamReports,
+  getExtraReportsCatalog,
+  getHrReports,
+  getOpsReports,
+  getUnavailableReports,
+} from "./extended-reports.service.js";
 
 export type ReportModule =
   | "students"
@@ -235,6 +243,12 @@ export async function getReportHub(
     studentReports: productMode === "LMS" ? [] : STUDENT_REPORTS,
     feeReports: productMode === "LMS" ? [] : FEE_REPORTS,
     homeworkReports: HOMEWORK_REPORTS,
+    attendanceReports: ATTENDANCE_REPORTS,
+    hrReports: productMode === "LMS" ? [] : getHrReports(),
+    examReports: getExamReports(),
+    opsReports: getOpsReports(),
+    extraReports: getExtraReportsCatalog(),
+    unavailableReports: getUnavailableReports(),
     modules: modules.filter(({ key }) => {
       if (productMode === "LMS") return !["finance", "hr"].includes(key);
       if (productMode === "CMS") return !["timetable"].includes(key);

@@ -16,6 +16,11 @@ import {
   runStudentReport,
   type StudentReportKey,
 } from "./student-reports.service.js";
+import {
+  runExtendedReport,
+  type ExtendedReportKey,
+  type ExtendedReportSection,
+} from "./extended-reports.service.js";
 
 const moduleParams = z.object({
   module: z.enum([
@@ -56,6 +61,8 @@ const studentReportParams = z.object({
     "student_siblings",
     "student_guardian",
     "student_teacher",
+    "student_headcounts",
+    "class_subject",
     "online_admissions",
     "at_school_admissions",
   ]),
@@ -73,6 +80,8 @@ const feeReportParams = z.object({
     "balance_fee",
     "parents_wise_due",
     "students_wise_fee",
+    "fee_statement",
+    "previous_session_fees",
     "fine_report",
     "discount_report",
     "online_fee",
@@ -90,6 +99,43 @@ const reportQuery = z.object({
     .enum(["true", "false"])
     .transform((value) => value === "true")
     .optional(),
+});
+
+const extraReportParams = z.object({
+  reportKey: z.enum([
+    "staff",
+    "payroll",
+    "staff_birthday",
+    "user_log",
+    "audit_trail",
+    "transport",
+    "hostel",
+    "alumni",
+    "exam_rank_session",
+    "exam_cumulative",
+    "book_issue",
+    "book_due",
+    "book_inventory",
+    "book_return",
+    "stock",
+    "add_item",
+    "issue_item",
+    "online_exam_wise",
+    "online_exams",
+    "online_attempt",
+    "online_rank",
+    "subjective_marks",
+    "syllabus_status",
+    "subject_lesson_plan",
+  ]),
+});
+
+const extraReportQuery = reportQuery.extend({
+  section: z
+    .enum(["hr", "ops", "exams", "library", "inventory", "onlineExam", "lessonPlan", "alumni"])
+    .optional(),
+  examGroupId: z.string().min(1).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
 });
 
 export async function getReportHubController(req: Request, res: Response) {
@@ -175,6 +221,40 @@ export async function runModuleReportController(req: Request, res: Response) {
       req.auth!.tenantId!,
       module as ReportModule,
       reportQuery.parse(req.query),
+    ),
+  });
+}
+
+export async function runExtraReportController(req: Request, res: Response) {
+  const { reportKey } = extraReportParams.parse(req.params);
+  const query = extraReportQuery.parse(req.query);
+  const cmsOnlyKeys = new Set([
+    "staff",
+    "payroll",
+    "staff_birthday",
+    "transport",
+    "hostel",
+  ]);
+  if (req.auth!.productMode === "LMS" && cmsOnlyKeys.has(reportKey)) {
+    throw new AppError(
+      403,
+      "This report requires CMS entitlement",
+      "ENTITLEMENT_REQUIRED",
+    );
+  }
+  res.json({
+    data: await runExtendedReport(
+      req.auth!.tenantId!,
+      reportKey as ExtendedReportKey,
+      {
+        section: query.section as ExtendedReportSection | undefined,
+        sessionId: query.sessionId,
+        from: query.from,
+        to: query.to,
+        classSectionId: query.classSectionId,
+        examGroupId: query.examGroupId,
+        month: query.month,
+      },
     ),
   });
 }
