@@ -1,6 +1,7 @@
 import { NotificationType, NoticeAudience } from "@prisma/client";
 import type { Request, Response } from "express";
 import { z } from "zod";
+import { sendSms } from "../../lib/sms.js";
 import {
   createNotification,
   getUnreadCount,
@@ -103,5 +104,21 @@ export async function unsubscribePushController(req: Request, res: Response) {
 export async function testPushController(req: Request, res: Response) {
   const result = await sendPushTestNotification(req.auth!.tenantId!, req.auth!.userId);
   res.json({ data: result });
+}
+
+const sendSmsBody = z.object({
+  to: z.string().trim().min(8).max(30),
+  body: z.string().trim().min(1).max(1000),
+  studentId: z.string().min(1).optional(),
+});
+
+export async function sendSmsController(req: Request, res: Response) {
+  const body = sendSmsBody.parse(req.body);
+  const result = await sendSms({
+    tenantId: req.auth!.tenantId!,
+    to: body.to,
+    body: body.body,
+  });
+  res.json({ data: { ...result, studentId: body.studentId ?? null } });
 }
 

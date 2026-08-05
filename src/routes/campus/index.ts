@@ -4,6 +4,7 @@ import {
   authenticate,
   requireEntitlement,
   requireModule,
+  requireAnyPermission,
   requirePermission,
   requireTenant,
 } from "../../middleware/auth.middleware.js";
@@ -103,6 +104,7 @@ import {
   markAllReadController,
   markReadController,
   sendFeeOverdueRemindersController,
+  sendSmsController,
   subscribePushController,
   testPushController,
   unsubscribePushController,
@@ -150,6 +152,12 @@ import {
   updateFeeTypeController,
   updateReceiptBookController,
 } from "../../modules/fees/fees.controller.js";
+import {
+  confirmOnlineOrderController,
+  createOnlineOrderController,
+  getOnlineOrderController,
+  getOnlinePaymentConfigController,
+} from "../../modules/fees/online-payments.controller.js";
 import {
   awardAttendancePointsController,
   createLeaveController,
@@ -299,8 +307,25 @@ import {
   upsertShortcutController,
   upsertSystemFieldController,
 } from "../../modules/erp/erp.controller.js";
-
-
+import {
+  assignHostelStudentController,
+  createHostelBlockController,
+  createHostelRoomController,
+  deleteHostelBlockController,
+  deleteHostelRoomController,
+  listHostelBlocksController,
+  listHostelRoomsController,
+  updateHostelBlockController,
+  updateHostelRoomController,
+} from "../../modules/hostel/hostel.controller.js";
+import {
+  assignTransportStudentController,
+  createTransportRouteController,
+  deleteTransportRouteController,
+  listRouteStudentsController,
+  listTransportRoutesController,
+  updateTransportRouteController,
+} from "../../modules/transport/transport.controller.js";
 
 const campusRouter = Router();
 campusRouter.use(authenticate, requireTenant);
@@ -320,6 +345,8 @@ campusRouter.use("/timetable", requireEntitlement("LMS"), requireModule("timetab
 // gated by module toggle + permissions only, like exams.
 campusRouter.use("/homework", requireModule("homework"));
 campusRouter.use("/homework-reports", requireModule("homework"));
+campusRouter.use("/transport", requireEntitlement("CMS"), requireModule("transport"));
+campusRouter.use("/hostel", requireEntitlement("CMS"), requireModule("hostel"));
 
 campusRouter.get(
   "/settings",
@@ -390,6 +417,88 @@ campusRouter.delete(
 campusRouter.post(
   "/notifications/push/test",
   asyncHandler(testPushController),
+);
+campusRouter.post(
+  "/notifications/sms/send",
+  requireAnyPermission("notifications.manage", "fees.manage"),
+  asyncHandler(sendSmsController),
+);
+
+campusRouter.get(
+  "/transport/routes",
+  requirePermission("transport.view"),
+  asyncHandler(listTransportRoutesController),
+);
+campusRouter.post(
+  "/transport/routes",
+  requirePermission("transport.manage"),
+  asyncHandler(createTransportRouteController),
+);
+campusRouter.put(
+  "/transport/routes/:id",
+  requirePermission("transport.manage"),
+  asyncHandler(updateTransportRouteController),
+);
+campusRouter.delete(
+  "/transport/routes/:id",
+  requirePermission("transport.manage"),
+  asyncHandler(deleteTransportRouteController),
+);
+campusRouter.get(
+  "/transport/routes/:id/students",
+  requirePermission("transport.view"),
+  asyncHandler(listRouteStudentsController),
+);
+campusRouter.post(
+  "/transport/assign",
+  requirePermission("transport.manage"),
+  asyncHandler(assignTransportStudentController),
+);
+
+campusRouter.get(
+  "/hostel/blocks",
+  requirePermission("hostel.view"),
+  asyncHandler(listHostelBlocksController),
+);
+campusRouter.post(
+  "/hostel/blocks",
+  requirePermission("hostel.manage"),
+  asyncHandler(createHostelBlockController),
+);
+campusRouter.put(
+  "/hostel/blocks/:id",
+  requirePermission("hostel.manage"),
+  asyncHandler(updateHostelBlockController),
+);
+campusRouter.delete(
+  "/hostel/blocks/:id",
+  requirePermission("hostel.manage"),
+  asyncHandler(deleteHostelBlockController),
+);
+campusRouter.get(
+  "/hostel/rooms",
+  requirePermission("hostel.view"),
+  asyncHandler(listHostelRoomsController),
+);
+campusRouter.post(
+  "/hostel/rooms",
+  requirePermission("hostel.manage"),
+  asyncHandler(createHostelRoomController),
+);
+campusRouter.put(
+  "/hostel/rooms/:id",
+  requirePermission("hostel.manage"),
+  asyncHandler(updateHostelRoomController),
+);
+campusRouter.delete(
+  "/hostel/rooms/:id",
+  requirePermission("hostel.manage"),
+  asyncHandler(deleteHostelRoomController),
+);
+campusRouter.post(
+  "/hostel/assign",
+  requirePermission("hostel.manage"),
+  asyncHandler(assignHostelStudentController),
 );
 
 campusRouter.get(
@@ -967,6 +1076,30 @@ campusRouter.post(
   requireEntitlement("CMS"),
   requirePermission("fees.manage"),
   asyncHandler(carryForwardPreviousDuesController),
+);
+campusRouter.get(
+  "/fees/online/config",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(getOnlinePaymentConfigController),
+);
+campusRouter.post(
+  "/fees/online/orders",
+  requireEntitlement("CMS"),
+  requirePermission("fees.collect"),
+  asyncHandler(createOnlineOrderController),
+);
+campusRouter.get(
+  "/fees/online/orders/:id",
+  requireEntitlement("CMS"),
+  requirePermission("fees.view"),
+  asyncHandler(getOnlineOrderController),
+);
+campusRouter.post(
+  "/fees/online/orders/:id/confirm",
+  requireEntitlement("CMS"),
+  requirePermission("fees.collect"),
+  asyncHandler(confirmOnlineOrderController),
 );
 
 campusRouter.get(

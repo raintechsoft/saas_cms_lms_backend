@@ -40,6 +40,15 @@ export function requirePermission(permission: string) {
   };
 }
 
+export function requireAnyPermission(...permissions: string[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!permissions.some((permission) => req.auth?.permissions.includes(permission))) {
+      return next(new AppError(403, "Insufficient permission", "FORBIDDEN"));
+    }
+    next();
+  };
+}
+
 export function requireRole(...roles: string[]) {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.auth?.roles.some((role) => roles.includes(role))) {

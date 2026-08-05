@@ -59,8 +59,26 @@ function mapStudentProfile(student: AccessibleStudent) {
     admissionType: student.admissionType,
     transportOptIn: student.transportOptIn,
     transportRoute: student.transportRoute,
+    transport: student.transportRouteRef
+      ? {
+          routeId: student.transportRouteRef.id,
+          routeName: student.transportRouteRef.name,
+          code: student.transportRouteRef.code,
+          vehicleNumber: student.transportRouteRef.vehicleNumber,
+          driverName: student.transportRouteRef.driverName,
+          driverPhone: student.transportRouteRef.driverPhone,
+        }
+      : null,
     hostelOptIn: student.hostelOptIn,
     hostelRoom: student.hostelRoom,
+    hostel: student.hostelRoomRef
+      ? {
+          roomId: student.hostelRoomRef.id,
+          roomName: student.hostelRoomRef.name,
+          blockId: student.hostelRoomRef.block.id,
+          blockName: student.hostelRoomRef.block.name,
+        }
+      : null,
     additionalNotes: student.additionalNotes,
   };
 }

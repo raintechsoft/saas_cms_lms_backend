@@ -4,8 +4,9 @@ import helmet from "helmet";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { env } from "./config/env.js";
-import { AppError } from "./lib/errors.js";
+import { AppError, asyncHandler } from "./lib/errors.js";
 import { getStorageDriver, UPLOAD_ROOT } from "./lib/uploads.js";
+import { razorpayWebhookController } from "./modules/fees/online-payments.controller.js";
 import { apiRouter } from "./routes/index.js";
 
 export const app = express();
@@ -40,6 +41,12 @@ app.use(
     credentials: false,
   }),
 );
+app.post(
+  "/api/v1/webhooks/razorpay",
+  express.raw({ type: "application/json" }),
+  asyncHandler(razorpayWebhookController),
+);
+
 // Staff photos/documents, leave attachments and homework attachments are sent
 // as base64 data URLs (a 20MB file becomes ~27MB encoded), so the JSON limit
 // must accommodate them.

@@ -23,6 +23,12 @@ import {
   uploadPortalStudentPhotoController,
 } from "../../modules/portal/portal.controller.js";
 import {
+  confirmPortalOnlineOrderController,
+  createPortalOnlineOrderController,
+  getOnlinePaymentConfigController,
+  getPortalOnlineOrderController,
+} from "../../modules/fees/online-payments.controller.js";
+import {
   getUnreadCountController,
   listNotificationsController,
   markAllReadController,
@@ -42,6 +48,16 @@ portalRouter.get("/children/:studentId/attendance", asyncHandler(getPortalAttend
 portalRouter.get("/children/:studentId/leaves", asyncHandler(getPortalLeavesController));
 portalRouter.post("/children/:studentId/leaves", asyncHandler(createPortalLeaveController));
 portalRouter.get("/children/:studentId/fees", asyncHandler(getPortalFeesController));
+portalRouter.get("/fees/online/config", asyncHandler(getOnlinePaymentConfigController));
+portalRouter.post(
+  "/children/:studentId/fees/online/orders",
+  asyncHandler(createPortalOnlineOrderController),
+);
+portalRouter.get("/fees/online/orders/:id", asyncHandler(getPortalOnlineOrderController));
+portalRouter.post(
+  "/fees/online/orders/:id/confirm",
+  asyncHandler(confirmPortalOnlineOrderController),
+);
 portalRouter.get("/children/:studentId/documents", asyncHandler(getPortalDocumentsController));
 portalRouter.post(
   "/children/:studentId/documents",

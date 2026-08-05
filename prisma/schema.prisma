@@ -232,6 +232,19 @@ enum ErpSettingCategory {
   EMAIL
   WEBSITE
   LIVE_CLASS
+  PAYMENT
+}
+
+enum OnlineFeeOrderStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum OnlineFeeGateway {
+  RAZORPAY
 }
 
 enum CustomFieldTarget {
@@ -303,7 +316,11 @@ model Tenant {
   feeInvoices            FeeInvoice[]
   feePayments            FeePayment[]
   feeReceiptBooks        FeeReceiptBook[]
+  onlineFeeOrders        OnlineFeeOrder[]
   feeSetting             TenantFeeSetting?
+  transportRoutes        TransportRoute[]
+  hostelBlocks           HostelBlock[]
+  hostelRooms            HostelRoom[]
   attendanceRecords      AttendanceRecord[]
   studentLeaves          StudentLeave[]
   attendancePoints       AttendancePoint[]
@@ -383,6 +400,7 @@ model User {
   taughtClassSections      ClassSection[]               @relation("ClassTeacher")
   subjectAssignments       ClassSubject[]               @relation("SubjectTeacher")
   feePaymentsCreated       FeePayment[]                 @relation("PaymentCreator")
+  onlineFeeOrdersCreated   OnlineFeeOrder[]             @relation("OnlineFeeOrderCreator")
   attendanceMarked         AttendanceRecord[]           @relation("AttendanceMarker")
   leavesReviewed           StudentLeave[]               @relation("LeaveReviewer")
   pointsAwarded            AttendancePoint[]            @relation("PointAwarder")
@@ -480,6 +498,7 @@ model AcademicSession {
   feeMasters        FeeMaster[]
   feeInvoices       FeeInvoice[]
   feePayments       FeePayment[]
+  onlineFeeOrders   OnlineFeeOrder[]
   attendanceRecords AttendanceRecord[]
   studentLeaves     StudentLeave[]
   attendancePoints  AttendancePoint[]
@@ -601,8 +620,10 @@ model Student {
   rteCertificateNo   String?                      @map("rte_certificate_no")
   transportOptIn     Boolean                      @default(false) @map("transport_opt_in")
   transportRoute     String?                      @map("transport_route")
+  transportRouteId   String?                      @map("transport_route_id")
   hostelOptIn        Boolean                      @default(false) @map("hostel_opt_in")
   hostelRoom         String?                      @map("hostel_room")
+  hostelRoomId       String?                      @map("hostel_room_id")
   additionalNotes    String?                      @map("additional_notes") @db.Text
   status             StudentStatus                @default(ACTIVE)
   disabledReason     String?                      @map("disabled_reason")
@@ -613,9 +634,12 @@ model Student {
   user               User?                        @relation(fields: [userId], references: [id], onDelete: SetNull)
   category           StudentCategory?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   house              StudentHouse?                @relation(fields: [houseId], references: [id], onDelete: SetNull)
+  transportRouteRef  TransportRoute?              @relation(fields: [transportRouteId], references: [id], onDelete: SetNull)
+  hostelRoomRef      HostelRoom?                  @relation(fields: [hostelRoomId], references: [id], onDelete: SetNull)
   enrollments        StudentEnrollment[]
   feePayments        FeePayment[]
   feeInvoices        FeeInvoice[]
+  onlineFeeOrders    OnlineFeeOrder[]
   generatedDocuments GeneratedDocument[]
   documents          StudentDocument[]
   guardians          StudentGuardian[]
@@ -628,6 +652,8 @@ model Student {
   @@index([tenantId, siblingGroupId])
   @@index([categoryId])
   @@index([houseId])
+  @@index([transportRouteId])
+  @@index([hostelRoomId])
   @@map("students")
 }
 
@@ -1041,6 +1067,7 @@ model FeePayment {
   receiptBook       FeeReceiptBook   @relation(fields: [receiptBookId], references: [id], onDelete: Restrict)
   createdBy         User             @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: Restrict)
   items             FeePaymentItem[]
+  onlineOrder       OnlineFeeOrder?
 
   @@unique([tenantId, receiptNumber])
   @@unique([tenantId, paymentId])
@@ -1062,6 +1089,97 @@ model FeePaymentItem {
 
   @@index([assignmentId])
   @@map("fee_payment_items")
+}
+
+model OnlineFeeOrder {
+  id                String               @id @default(cuid())
+  tenantId          String               @map("tenant_id")
+  studentId         String               @map("student_id")
+  academicSessionId String               @map("academic_session_id")
+  amount            Decimal              @db.Decimal(12, 2)
+  currency          String               @default("INR")
+  status            OnlineFeeOrderStatus @default(PENDING)
+  gateway           OnlineFeeGateway     @default(RAZORPAY)
+  gatewayOrderId    String?              @map("gateway_order_id")
+  gatewayPaymentId  String?              @map("gateway_payment_id")
+  gatewaySignature  String?              @map("gateway_signature")
+  feePaymentId      String?              @unique @map("fee_payment_id")
+  items             Json
+  metadata          Json?
+  createdByUserId   String               @map("created_by_user_id")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  tenant            Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student           Student              @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  academicSession   AcademicSession      @relation(fields: [academicSessionId], references: [id], onDelete: Restrict)
+  feePayment        FeePayment?          @relation(fields: [feePaymentId], references: [id], onDelete: SetNull)
+  createdBy         User                 @relation("OnlineFeeOrderCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, gatewayOrderId])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, studentId])
+  @@index([gatewayPaymentId])
+  @@map("online_fee_orders")
+}
+
+model TransportRoute {
+  id            String    @id @default(cuid())
+  tenantId      String    @map("tenant_id")
+  name          String
+  code          String?
+  vehicleNumber String?   @map("vehicle_number")
+  driverName    String?   @map("driver_name")
+  driverPhone   String?   @map("driver_phone")
+  stops         Json?
+  fareAmount    Decimal?  @map("fare_amount") @db.Decimal(12, 2)
+  isActive      Boolean   @default(true) @map("is_active")
+  notes         String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  students      Student[]
+
+  @@unique([tenantId, name])
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("transport_routes")
+}
+
+model HostelBlock {
+  id        String       @id @default(cuid())
+  tenantId  String       @map("tenant_id")
+  name      String
+  gender    String?
+  isActive  Boolean      @default(true) @map("is_active")
+  notes     String?      @db.Text
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  rooms     HostelRoom[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+  @@map("hostel_blocks")
+}
+
+model HostelRoom {
+  id        String      @id @default(cuid())
+  tenantId  String      @map("tenant_id")
+  blockId   String      @map("block_id")
+  name      String
+  capacity  Int         @default(1)
+  isActive  Boolean     @default(true) @map("is_active")
+  notes     String?     @db.Text
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  block     HostelBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  students  Student[]
+
+  @@unique([tenantId, blockId, name])
+  @@index([tenantId, isActive])
+  @@index([blockId])
+  @@map("hostel_rooms")
 }
 
 model FeeFineRange {

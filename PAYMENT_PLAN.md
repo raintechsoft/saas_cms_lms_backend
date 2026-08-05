@@ -1,7 +1,7 @@
 # SaaS CMS LMS — Online Fee Payment Plan
 
-**Status:** Planned (do not implement until school management UI is confirmed)  
-**Last updated:** 2026-07-23  
+**Status:** Phase A implemented (Razorpay orders, webhook, FeePayment posting)  
+**Last updated:** 2026-08-05  
 **Owner (backend):** Anwin  
 **Related repos:** `saas_cms_lms_backend`, `saas_cms_lms_frontend`
 
@@ -285,7 +285,7 @@ RAZORPAY_WEBHOOK_SECRET=xxx
 - No payment coding until school management UI is confirmed
 - Avoid rework on checkout entry points and fee screens
 
-### Phase A — Backend foundation
+### Phase A — Backend foundation ✅
 1. Migration for `online_fee_orders`
 2. Razorpay provider adapter
 3. Create-order API

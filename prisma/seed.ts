@@ -49,6 +49,10 @@ const permissions = [
   ["erp.view", "View ERP configuration"],
   ["erp.manage", "Manage ERP configuration"],
   ["erp.backup", "Create and restore tenant configuration backups"],
+  ["transport.view", "View transport routes and assignments"],
+  ["transport.manage", "Manage transport routes and assignments"],
+  ["hostel.view", "View hostel blocks, rooms, and assignments"],
+  ["hostel.manage", "Manage hostel blocks, rooms, and assignments"],
 ] as const;
 
 async function main() {
@@ -1187,6 +1191,9 @@ async function main() {
     "hr",
     "documents",
     "reports",
+    "transport",
+    "hostel",
+    "notices",
   ]) {
     await prisma.tenantModuleSetting.upsert({
       where: { tenantId_moduleKey: { tenantId: demoTenant.id, moduleKey } },

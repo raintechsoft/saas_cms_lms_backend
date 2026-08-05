@@ -11,6 +11,23 @@ export interface PortalViewer {
 const studentInclude = {
   category: true,
   house: true,
+  transportRouteRef: {
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      vehicleNumber: true,
+      driverName: true,
+      driverPhone: true,
+    },
+  },
+  hostelRoomRef: {
+    select: {
+      id: true,
+      name: true,
+      block: { select: { id: true, name: true } },
+    },
+  },
   enrollments: {
     where: { status: EnrollmentStatus.ACTIVE },
     include: {

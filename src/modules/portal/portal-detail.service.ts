@@ -146,6 +146,7 @@ export async function getPortalChildFees(
   const dueAssignment = statement.assignments.find((item) => item.totals.balance > 0) ?? null;
 
   return {
+    academicSessionId: enrollment?.academicSessionId ?? null,
     statement,
     due: dueAssignment
       ? {

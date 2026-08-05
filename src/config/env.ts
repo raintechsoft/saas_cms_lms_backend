@@ -79,6 +79,9 @@ const schema = z
       .default("false")
       .transform((value) => value === "true"),
     S3_PUBLIC_BASE_URL: z.string().url().optional(),
+    RAZORPAY_KEY_ID: z.string().min(1).optional(),
+    RAZORPAY_KEY_SECRET: z.string().min(1).optional(),
+    RAZORPAY_WEBHOOK_SECRET: z.string().min(1).optional(),
   })
   .superRefine((value, ctx) => {
     const anySmtp = Boolean(value.SMTP_HOST || value.SMTP_USER || value.SMTP_PASS);
