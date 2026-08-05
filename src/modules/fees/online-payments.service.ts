@@ -54,9 +54,11 @@ async function resolveCredentials(tenantId: string): Promise<ResolvedCredentials
   const config = (integration?.config ?? {}) as Record<string, unknown>;
   const secrets = integration?.secrets ?? {};
 
-  const keyId = secrets.keyId || env.RAZORPAY_KEY_ID || "";
-  const keySecret = secrets.keySecret || env.RAZORPAY_KEY_SECRET || "";
-  const webhookSecret = secrets.webhookSecret || env.RAZORPAY_WEBHOOK_SECRET || "";
+  const keyId = String(secrets.keyId || env.RAZORPAY_KEY_ID || "").trim();
+  const keySecret = String(secrets.keySecret || env.RAZORPAY_KEY_SECRET || "").trim();
+  const webhookSecret = String(
+    secrets.webhookSecret || env.RAZORPAY_WEBHOOK_SECRET || "",
+  ).trim();
   const currency = typeof config.currency === "string" && config.currency.trim()
     ? config.currency.trim().toUpperCase()
     : "INR";
