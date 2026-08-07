@@ -7,6 +7,8 @@ export type TransportStop = {
   name: string;
   sequence?: number;
   fare?: number | null;
+  pickupTime?: string | null;
+  dropTime?: string | null;
 };
 
 export type TransportRouteInput = {
@@ -44,10 +46,16 @@ export function normalizeStops(raw: unknown): TransportStop[] {
       row.fare == null || row.fare === ""
         ? null
         : Number(row.fare);
+    const pickupTime =
+      typeof row.pickupTime === "string" && row.pickupTime.trim() ? row.pickupTime.trim() : null;
+    const dropTime =
+      typeof row.dropTime === "string" && row.dropTime.trim() ? row.dropTime.trim() : null;
     stops.push({
       name,
       sequence,
       fare: fare != null && Number.isFinite(fare) ? fare : null,
+      pickupTime,
+      dropTime,
     });
   }
   return stops.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));

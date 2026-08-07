@@ -222,8 +222,10 @@ type DbClient = Prisma.TransactionClient | typeof prisma;
 
 /**
  * Persists the super admin's module selection as TenantModuleSetting rows.
- * Enabling a module that the tenant admin fine-tuned per panel (via ERP settings)
- * leaves those panel flags untouched; only fully-disabled modules are re-enabled.
+ * When a module is enabled in the platform tenant form, the admin side panel
+ * always turns on (`adminEnabled: true`) so Transport/Hostel/etc. appear.
+ * Student/parent flags are restored when the module was fully off; otherwise
+ * they keep any ERP fine-tuning.
  */
 async function applyTenantModuleSelection(
   tenantId: string,
@@ -247,17 +249,30 @@ async function applyTenantModuleSelection(
           parentEnabled: isEnabled,
         },
       });
-    } else if (!isEnabled) {
+      continue;
+    }
+
+    if (!isEnabled) {
       if (row.adminEnabled || row.studentEnabled || row.parentEnabled) {
         await client.tenantModuleSetting.update({
           where: { id: row.id },
           data: { adminEnabled: false, studentEnabled: false, parentEnabled: false },
         });
       }
-    } else if (!row.adminEnabled && !row.studentEnabled && !row.parentEnabled) {
+      continue;
+    }
+
+    // Module selected by super admin → ensure campus admin can see it.
+    const fullyOff = !row.adminEnabled && !row.studentEnabled && !row.parentEnabled;
+    if (fullyOff) {
       await client.tenantModuleSetting.update({
         where: { id: row.id },
         data: { adminEnabled: true, studentEnabled: true, parentEnabled: true },
+      });
+    } else if (!row.adminEnabled) {
+      await client.tenantModuleSetting.update({
+        where: { id: row.id },
+        data: { adminEnabled: true },
       });
     }
   }
@@ -377,6 +392,9 @@ export async function updateTenant(id: string, input: UpdateTenantInput) {
 
   if (input.modules) {
     await applyTenantModuleSelection(id, input.modules);
+    // Keep institution admin permissions in sync (e.g. transport.view / hostel.view
+    // added after the tenant was first created).
+    await ensureInstitutionAdminRole(id);
   }
 
   return updated;

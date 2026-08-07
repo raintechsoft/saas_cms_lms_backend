@@ -445,6 +445,11 @@ campusRouter.put(
   requirePermission("transport.manage"),
   asyncHandler(updateTransportRouteController),
 );
+campusRouter.patch(
+  "/transport/routes/:id",
+  requirePermission("transport.manage"),
+  asyncHandler(updateTransportRouteController),
+);
 campusRouter.delete(
   "/transport/routes/:id",
   requirePermission("transport.manage"),

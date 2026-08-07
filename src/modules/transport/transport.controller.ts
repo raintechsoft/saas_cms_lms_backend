@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { z } from "zod";
+import { AppError } from "../../lib/errors.js";
 import {
   assignStudentToRoute,
   createTransportRoute,
@@ -17,6 +18,8 @@ const stopSchema = z.object({
   name: z.string().trim().min(1).max(120),
   sequence: z.coerce.number().int().min(0).optional(),
   fare: z.coerce.number().min(0).nullable().optional(),
+  pickupTime: z.string().trim().max(20).nullable().optional(),
+  dropTime: z.string().trim().max(20).nullable().optional(),
 });
 
 const routeBody = z.object({
@@ -61,6 +64,9 @@ export async function createTransportRouteController(req: Request, res: Response
 export async function updateTransportRouteController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   const body = routeBody.partial().parse(req.body);
+  if (body.name !== undefined && !body.name.trim()) {
+    throw new AppError(400, "Route name is required", "TRANSPORT_ROUTE_NAME_REQUIRED");
+  }
   res.json({
     data: await updateTransportRoute(req.auth!.tenantId!, id, {
       ...body,
