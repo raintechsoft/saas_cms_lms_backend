@@ -324,6 +324,9 @@ model Tenant {
   hostelBeds             HostelBed[]
   transportAssignmentLogs TransportAssignmentLog[]
   hostelAllocationLogs   HostelAllocationLog[]
+  libraryCategories      LibraryCategory[]
+  libraryBooks           LibraryBook[]
+  libraryLoans           LibraryLoan[]
   attendanceRecords      AttendanceRecord[]
   studentLeaves          StudentLeave[]
   attendancePoints       AttendancePoint[]
@@ -406,6 +409,8 @@ model User {
   onlineFeeOrdersCreated   OnlineFeeOrder[]             @relation("OnlineFeeOrderCreator")
   transportAssignmentsMade TransportAssignmentLog[]     @relation("TransportAssignmentActor")
   hostelAllocationsMade    HostelAllocationLog[]        @relation("HostelAllocationActor")
+  libraryLoansIssued       LibraryLoan[]                @relation("LibraryLoanIssuer")
+  libraryLoansReturned     LibraryLoan[]                @relation("LibraryLoanReturner")
   attendanceMarked         AttendanceRecord[]           @relation("AttendanceMarker")
   leavesReviewed           StudentLeave[]               @relation("LeaveReviewer")
   pointsAwarded            AttendancePoint[]            @relation("PointAwarder")
@@ -655,6 +660,7 @@ model Student {
   scholarships       SchoolScholar[]
   transportAssignmentLogs TransportAssignmentLog[]
   hostelAllocationLogs    HostelAllocationLog[]
+  libraryLoans            LibraryLoan[]
 
   @@unique([tenantId, admissionNumber])
   @@index([tenantId, status])
@@ -1251,6 +1257,82 @@ model HostelAllocationLog {
   @@index([tenantId, studentId, createdAt])
   @@index([tenantId, hostelRoomId])
   @@map("hostel_allocation_logs")
+}
+
+enum LibraryLoanStatus {
+  ISSUED
+  RETURNED
+  LOST
+}
+
+model LibraryCategory {
+  id        String        @id @default(cuid())
+  tenantId  String        @map("tenant_id")
+  name      String
+  isActive  Boolean       @default(true) @map("is_active")
+  notes     String?       @db.Text
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  books     LibraryBook[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+  @@map("library_categories")
+}
+
+model LibraryBook {
+  id              String           @id @default(cuid())
+  tenantId        String           @map("tenant_id")
+  categoryId      String?          @map("category_id")
+  title           String
+  author          String?
+  isbn            String?
+  accessionNo     String?          @map("accession_no")
+  publisher       String?
+  publishedYear   Int?             @map("published_year")
+  totalCopies     Int              @default(1) @map("total_copies")
+  availableCopies Int              @default(1) @map("available_copies")
+  location        String?
+  isActive        Boolean          @default(true) @map("is_active")
+  notes           String?          @db.Text
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category        LibraryCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  loans           LibraryLoan[]
+
+  @@unique([tenantId, accessionNo])
+  @@index([tenantId, isActive])
+  @@index([tenantId, title])
+  @@map("library_books")
+}
+
+model LibraryLoan {
+  id           String            @id @default(cuid())
+  tenantId     String            @map("tenant_id")
+  bookId       String            @map("book_id")
+  studentId    String            @map("student_id")
+  issuedAt     DateTime          @default(now()) @map("issued_at")
+  dueAt        DateTime          @map("due_at")
+  returnedAt   DateTime?         @map("returned_at")
+  status       LibraryLoanStatus @default(ISSUED)
+  fineAmount   Decimal?          @map("fine_amount") @db.Decimal(12, 2)
+  note         String?
+  issuedById   String?           @map("issued_by_id")
+  returnedById String?           @map("returned_by_id")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  book         LibraryBook       @relation(fields: [bookId], references: [id], onDelete: Restrict)
+  student      Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  issuedBy     User?             @relation("LibraryLoanIssuer", fields: [issuedById], references: [id], onDelete: SetNull)
+  returnedBy   User?             @relation("LibraryLoanReturner", fields: [returnedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, dueAt])
+  @@index([tenantId, studentId, issuedAt])
+  @@index([tenantId, bookId, status])
+  @@map("library_loans")
 }
 
 model FeeFineRange {

@@ -53,6 +53,8 @@ const permissions = [
   ["transport.manage", "Manage transport routes and assignments"],
   ["hostel.view", "View hostel blocks, rooms, and assignments"],
   ["hostel.manage", "Manage hostel blocks, rooms, and assignments"],
+  ["library.view", "View library books and loans"],
+  ["library.manage", "Manage library books and issue/return"],
 ] as const;
 
 async function main() {
@@ -1193,6 +1195,7 @@ async function main() {
     "reports",
     "transport",
     "hostel",
+    "library",
     "notices",
   ]) {
     await prisma.tenantModuleSetting.upsert({

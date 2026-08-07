@@ -122,6 +122,21 @@ export async function bootstrapTenantWorkspace(tenantId: string, client: DbClien
 }
 
 export async function ensureInstitutionAdminRole(tenantId: string, client: DbClient = prisma) {
+  for (const [key, description] of [
+    ["library.view", "View library books and loans"],
+    ["library.manage", "Manage library books and issue/return"],
+    ["transport.view", "View transport routes and assignments"],
+    ["transport.manage", "Manage transport routes and assignments"],
+    ["hostel.view", "View hostel blocks, rooms, and assignments"],
+    ["hostel.manage", "Manage hostel blocks, rooms, and assignments"],
+  ] as const) {
+    await client.permission.upsert({
+      where: { key },
+      update: { description },
+      create: { key, description },
+    });
+  }
+
   const role = await client.role.upsert({
     where: { tenantId_code: { tenantId, code: "INSTITUTION_ADMIN" } },
     update: { name: "Institution Admin" },
@@ -141,6 +156,21 @@ export async function ensureInstitutionAdminRole(tenantId: string, client: DbCli
       data: permissions.map((permission) => ({ roleId: role.id, permissionId: permission.id })),
     });
   }
+
+  for (const moduleKey of ["library", "transport", "hostel"] as const) {
+    await client.tenantModuleSetting.upsert({
+      where: { tenantId_moduleKey: { tenantId, moduleKey } },
+      update: {},
+      create: {
+        tenantId,
+        moduleKey,
+        adminEnabled: true,
+        studentEnabled: true,
+        parentEnabled: true,
+      },
+    });
+  }
+
   return role;
 }
 

@@ -324,6 +324,20 @@ import {
   updateHostelRoomController,
 } from "../../modules/hostel/hostel.controller.js";
 import {
+  createLibraryBookController,
+  createLibraryCategoryController,
+  deleteLibraryBookController,
+  deleteLibraryCategoryController,
+  issueLibraryBookController,
+  librarySummaryController,
+  listLibraryBooksController,
+  listLibraryCategoriesController,
+  listLibraryLoansController,
+  returnLibraryBookController,
+  updateLibraryBookController,
+  updateLibraryCategoryController,
+} from "../../modules/library/library.controller.js";
+import {
   assignTransportStudentController,
   createTransportRouteController,
   deleteTransportRouteController,
@@ -353,6 +367,7 @@ campusRouter.use("/homework", requireModule("homework"));
 campusRouter.use("/homework-reports", requireModule("homework"));
 campusRouter.use("/transport", requireEntitlement("CMS"), requireModule("transport"));
 campusRouter.use("/hostel", requireEntitlement("CMS"), requireModule("hostel"));
+campusRouter.use("/library", requireEntitlement("CMS"), requireModule("library"));
 
 campusRouter.get(
   "/settings",
@@ -540,6 +555,67 @@ campusRouter.post(
   "/hostel/assign",
   requirePermission("hostel.manage"),
   asyncHandler(assignHostelStudentController),
+);
+
+campusRouter.get(
+  "/library/summary",
+  requirePermission("library.view"),
+  asyncHandler(librarySummaryController),
+);
+campusRouter.get(
+  "/library/categories",
+  requirePermission("library.view"),
+  asyncHandler(listLibraryCategoriesController),
+);
+campusRouter.post(
+  "/library/categories",
+  requirePermission("library.manage"),
+  asyncHandler(createLibraryCategoryController),
+);
+campusRouter.put(
+  "/library/categories/:id",
+  requirePermission("library.manage"),
+  asyncHandler(updateLibraryCategoryController),
+);
+campusRouter.delete(
+  "/library/categories/:id",
+  requirePermission("library.manage"),
+  asyncHandler(deleteLibraryCategoryController),
+);
+campusRouter.get(
+  "/library/books",
+  requirePermission("library.view"),
+  asyncHandler(listLibraryBooksController),
+);
+campusRouter.post(
+  "/library/books",
+  requirePermission("library.manage"),
+  asyncHandler(createLibraryBookController),
+);
+campusRouter.put(
+  "/library/books/:id",
+  requirePermission("library.manage"),
+  asyncHandler(updateLibraryBookController),
+);
+campusRouter.delete(
+  "/library/books/:id",
+  requirePermission("library.manage"),
+  asyncHandler(deleteLibraryBookController),
+);
+campusRouter.get(
+  "/library/loans",
+  requirePermission("library.view"),
+  asyncHandler(listLibraryLoansController),
+);
+campusRouter.post(
+  "/library/issue",
+  requirePermission("library.manage"),
+  asyncHandler(issueLibraryBookController),
+);
+campusRouter.post(
+  "/library/loans/:id/return",
+  requirePermission("library.manage"),
+  asyncHandler(returnLibraryBookController),
 );
 
 campusRouter.get(

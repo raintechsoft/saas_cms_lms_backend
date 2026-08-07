@@ -49,10 +49,6 @@ export type ExtendedReportKey =
 const STUB_MESSAGE = "Module not enabled in this build";
 
 const STUB_KEYS = new Set<ExtendedReportKey>([
-  "book_issue",
-  "book_due",
-  "book_inventory",
-  "book_return",
   "stock",
   "add_item",
   "issue_item",
@@ -98,10 +94,10 @@ const CATALOG: ReportCatalogItem[] = [
   { section: "alumni", key: "alumni", label: "Alumni Report", description: "Alumni student records", available: true },
   { section: "exams", key: "exam_rank_session", label: "Exam Rank (Session)", description: "Ranks per published exam in session", available: true },
   { section: "exams", key: "exam_cumulative", label: "Cumulative Exam Results", description: "Per-student totals across exams in session/group", available: true },
-  { section: "library", key: "book_issue", label: "Book Issue Report", description: "Library book issues", available: false },
-  { section: "library", key: "book_due", label: "Book Due Report", description: "Overdue library books", available: false },
-  { section: "library", key: "book_inventory", label: "Book Inventory Report", description: "Library inventory", available: false },
-  { section: "library", key: "book_return", label: "Book Return Report", description: "Returned library books", available: false },
+  { section: "library", key: "book_issue", label: "Book Issue Report", description: "Library book issues", available: true },
+  { section: "library", key: "book_due", label: "Book Due Report", description: "Overdue library books", available: true },
+  { section: "library", key: "book_inventory", label: "Book Inventory Report", description: "Library inventory", available: true },
+  { section: "library", key: "book_return", label: "Book Return Report", description: "Returned library books", available: true },
   { section: "inventory", key: "stock", label: "Stock Report", description: "Inventory stock levels", available: false },
   { section: "inventory", key: "add_item", label: "Add Item Report", description: "Items added to inventory", available: false },
   { section: "inventory", key: "issue_item", label: "Issue Item Report", description: "Items issued from inventory", available: false },
@@ -537,6 +533,87 @@ export async function runExtendedReport(
       to: query.to,
       classSectionId: query.classSectionId,
     });
+  }
+
+  if (
+    reportKey === "book_issue" ||
+    reportKey === "book_due" ||
+    reportKey === "book_return"
+  ) {
+    const now = new Date();
+    const loans = await prisma.libraryLoan.findMany({
+      where: tenantScope(tenantId, {
+        ...(reportKey === "book_issue" ? { status: "ISSUED" } : {}),
+        ...(reportKey === "book_due" ? { status: "ISSUED", dueAt: { lt: now } } : {}),
+        ...(reportKey === "book_return" ? { status: "RETURNED" } : {}),
+        ...(query.from || query.to
+          ? {
+              issuedAt: {
+                ...(query.from ? { gte: new Date(query.from) } : {}),
+                ...(query.to ? { lte: new Date(query.to) } : {}),
+              },
+            }
+          : {}),
+      }),
+      include: {
+        book: { select: { title: true, author: true, accessionNo: true, isbn: true } },
+        student: {
+          select: { admissionNumber: true, firstName: true, lastName: true },
+        },
+      },
+      orderBy: { issuedAt: "desc" },
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: { total: loans.length },
+      rows: loans.map((loan) => ({
+        id: loan.id,
+        admissionNumber: loan.student.admissionNumber,
+        student: nameOf(loan.student.firstName, loan.student.lastName),
+        book: loan.book.title,
+        author: loan.book.author,
+        accessionNo: loan.book.accessionNo,
+        issuedAt: loan.issuedAt.toISOString(),
+        dueAt: loan.dueAt.toISOString(),
+        returnedAt: loan.returnedAt?.toISOString() ?? null,
+        status: loan.status,
+        overdue: loan.status === "ISSUED" && loan.dueAt < now,
+      })),
+    };
+  }
+
+  if (reportKey === "book_inventory") {
+    const books = await prisma.libraryBook.findMany({
+      where: tenantScope(tenantId, {}),
+      include: { category: { select: { name: true } } },
+      orderBy: [{ title: "asc" }],
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: {
+        total: books.length,
+        availableCopies: books.reduce((sum, book) => sum + book.availableCopies, 0),
+        totalCopies: books.reduce((sum, book) => sum + book.totalCopies, 0),
+      },
+      rows: books.map((book) => ({
+        id: book.id,
+        title: book.title,
+        author: book.author,
+        accessionNo: book.accessionNo,
+        isbn: book.isbn,
+        category: book.category?.name ?? null,
+        location: book.location,
+        totalCopies: book.totalCopies,
+        availableCopies: book.availableCopies,
+        isActive: book.isActive,
+      })),
+    };
   }
 
   if (reportKey === "exam_rank_session") {
