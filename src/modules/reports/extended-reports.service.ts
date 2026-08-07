@@ -93,8 +93,8 @@ const CATALOG: ReportCatalogItem[] = [
   { section: "hr", key: "staff_birthday", label: "Staff Birthday Report", description: "Staff birthdays in range or by month", available: true },
   { section: "ops", key: "user_log", label: "User Login Activity", description: "Users with last login, email, roles and status", available: true },
   { section: "ops", key: "audit_trail", label: "Audit Trail", description: "Structured audit log entries", available: true },
-  { section: "ops", key: "transport", label: "Transport Report", description: "Students with transport opt-in or route", available: true },
-  { section: "ops", key: "hostel", label: "Hostel Report", description: "Students with hostel opt-in or room", available: true },
+  { section: "ops", key: "transport", label: "Transport Report", description: "Students with transport opt-in, route, and stop", available: true },
+  { section: "ops", key: "hostel", label: "Hostel Report", description: "Students with hostel opt-in, room, and bed", available: true },
   { section: "alumni", key: "alumni", label: "Alumni Report", description: "Alumni student records", available: true },
   { section: "exams", key: "exam_rank_session", label: "Exam Rank (Session)", description: "Ranks per published exam in session", available: true },
   { section: "exams", key: "exam_cumulative", label: "Cumulative Exam Results", description: "Per-student totals across exams in session/group", available: true },
@@ -462,6 +462,7 @@ export async function runExtendedReport(
           : null,
         transportOptIn: student.transportOptIn,
         transportRoute: student.transportRoute,
+        transportStopName: student.transportStopName,
         mobile: student.mobile,
       })),
     };
@@ -523,6 +524,7 @@ export async function runExtendedReport(
           : null,
         hostelOptIn: student.hostelOptIn,
         hostelRoom: student.hostelRoom,
+        hostelBedId: student.hostelBedId,
         mobile: student.mobile,
       })),
     };

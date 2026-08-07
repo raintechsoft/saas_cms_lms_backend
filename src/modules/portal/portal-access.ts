@@ -19,13 +19,17 @@ const studentInclude = {
       vehicleNumber: true,
       driverName: true,
       driverPhone: true,
+      stops: true,
     },
+  },
+  hostelBedRef: {
+    select: { id: true, label: true },
   },
   hostelRoomRef: {
     select: {
       id: true,
       name: true,
-      block: { select: { id: true, name: true } },
+      block: { select: { id: true, name: true, gender: true } },
     },
   },
   enrollments: {

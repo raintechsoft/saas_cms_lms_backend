@@ -321,6 +321,9 @@ model Tenant {
   transportRoutes        TransportRoute[]
   hostelBlocks           HostelBlock[]
   hostelRooms            HostelRoom[]
+  hostelBeds             HostelBed[]
+  transportAssignmentLogs TransportAssignmentLog[]
+  hostelAllocationLogs   HostelAllocationLog[]
   attendanceRecords      AttendanceRecord[]
   studentLeaves          StudentLeave[]
   attendancePoints       AttendancePoint[]
@@ -401,6 +404,8 @@ model User {
   subjectAssignments       ClassSubject[]               @relation("SubjectTeacher")
   feePaymentsCreated       FeePayment[]                 @relation("PaymentCreator")
   onlineFeeOrdersCreated   OnlineFeeOrder[]             @relation("OnlineFeeOrderCreator")
+  transportAssignmentsMade TransportAssignmentLog[]     @relation("TransportAssignmentActor")
+  hostelAllocationsMade    HostelAllocationLog[]        @relation("HostelAllocationActor")
   attendanceMarked         AttendanceRecord[]           @relation("AttendanceMarker")
   leavesReviewed           StudentLeave[]               @relation("LeaveReviewer")
   pointsAwarded            AttendancePoint[]            @relation("PointAwarder")
@@ -621,9 +626,11 @@ model Student {
   transportOptIn     Boolean                      @default(false) @map("transport_opt_in")
   transportRoute     String?                      @map("transport_route")
   transportRouteId   String?                      @map("transport_route_id")
+  transportStopName  String?                      @map("transport_stop_name")
   hostelOptIn        Boolean                      @default(false) @map("hostel_opt_in")
   hostelRoom         String?                      @map("hostel_room")
   hostelRoomId       String?                      @map("hostel_room_id")
+  hostelBedId        String?                      @unique @map("hostel_bed_id")
   additionalNotes    String?                      @map("additional_notes") @db.Text
   status             StudentStatus                @default(ACTIVE)
   disabledReason     String?                      @map("disabled_reason")
@@ -636,6 +643,7 @@ model Student {
   house              StudentHouse?                @relation(fields: [houseId], references: [id], onDelete: SetNull)
   transportRouteRef  TransportRoute?              @relation(fields: [transportRouteId], references: [id], onDelete: SetNull)
   hostelRoomRef      HostelRoom?                  @relation(fields: [hostelRoomId], references: [id], onDelete: SetNull)
+  hostelBedRef       HostelBed?                   @relation(fields: [hostelBedId], references: [id], onDelete: SetNull)
   enrollments        StudentEnrollment[]
   feePayments        FeePayment[]
   feeInvoices        FeeInvoice[]
@@ -645,6 +653,8 @@ model Student {
   guardians          StudentGuardian[]
   onlineAdmissions   OnlineAdmissionApplication[]
   scholarships       SchoolScholar[]
+  transportAssignmentLogs TransportAssignmentLog[]
+  hostelAllocationLogs    HostelAllocationLog[]
 
   @@unique([tenantId, admissionNumber])
   @@index([tenantId, status])
@@ -1123,26 +1133,47 @@ model OnlineFeeOrder {
 }
 
 model TransportRoute {
-  id            String    @id @default(cuid())
-  tenantId      String    @map("tenant_id")
+  id            String                    @id @default(cuid())
+  tenantId      String                    @map("tenant_id")
   name          String
   code          String?
-  vehicleNumber String?   @map("vehicle_number")
-  driverName    String?   @map("driver_name")
-  driverPhone   String?   @map("driver_phone")
+  vehicleNumber String?                   @map("vehicle_number")
+  driverName    String?                   @map("driver_name")
+  driverPhone   String?                   @map("driver_phone")
   stops         Json?
-  fareAmount    Decimal?  @map("fare_amount") @db.Decimal(12, 2)
-  isActive      Boolean   @default(true) @map("is_active")
-  notes         String?   @db.Text
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fareAmount    Decimal?                  @map("fare_amount") @db.Decimal(12, 2)
+  isActive      Boolean                   @default(true) @map("is_active")
+  notes         String?                   @db.Text
+  createdAt     DateTime                  @default(now()) @map("created_at")
+  updatedAt     DateTime                  @updatedAt @map("updated_at")
+  tenant        Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   students      Student[]
+  assignments   TransportAssignmentLog[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
   @@map("transport_routes")
+}
+
+model TransportAssignmentLog {
+  id              String          @id @default(cuid())
+  tenantId        String          @map("tenant_id")
+  studentId       String          @map("student_id")
+  transportRouteId String?        @map("transport_route_id")
+  stopName        String?         @map("stop_name")
+  action          String
+  note            String?
+  assignedById    String?         @map("assigned_by_id")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student         Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  transportRoute  TransportRoute? @relation(fields: [transportRouteId], references: [id], onDelete: SetNull)
+  assignedBy      User?           @relation("TransportAssignmentActor", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, studentId, createdAt])
+  @@index([tenantId, transportRouteId])
+  @@map("transport_assignment_logs")
 }
 
 model HostelBlock {
@@ -1175,11 +1206,51 @@ model HostelRoom {
   tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   block     HostelBlock @relation(fields: [blockId], references: [id], onDelete: Cascade)
   students  Student[]
+  beds      HostelBed[]
+  allocations HostelAllocationLog[]
 
   @@unique([tenantId, blockId, name])
   @@index([tenantId, isActive])
   @@index([blockId])
   @@map("hostel_rooms")
+}
+
+model HostelBed {
+  id        String     @id @default(cuid())
+  tenantId  String     @map("tenant_id")
+  roomId    String     @map("room_id")
+  label     String
+  isActive  Boolean    @default(true) @map("is_active")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  room      HostelRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  student   Student?
+
+  @@unique([tenantId, roomId, label])
+  @@index([tenantId, roomId, isActive])
+  @@map("hostel_beds")
+}
+
+model HostelAllocationLog {
+  id           String      @id @default(cuid())
+  tenantId     String      @map("tenant_id")
+  studentId    String      @map("student_id")
+  hostelRoomId String?     @map("hostel_room_id")
+  hostelBedId  String?     @map("hostel_bed_id")
+  roomLabel    String?     @map("room_label")
+  action       String
+  note         String?
+  assignedById String?     @map("assigned_by_id")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student      Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  hostelRoom   HostelRoom? @relation(fields: [hostelRoomId], references: [id], onDelete: SetNull)
+  assignedBy   User?       @relation("HostelAllocationActor", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, studentId, createdAt])
+  @@index([tenantId, hostelRoomId])
+  @@map("hostel_allocation_logs")
 }
 
 model FeeFineRange {

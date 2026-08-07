@@ -309,12 +309,17 @@ import {
 } from "../../modules/erp/erp.controller.js";
 import {
   assignHostelStudentController,
+  createHostelBedController,
   createHostelBlockController,
   createHostelRoomController,
+  deleteHostelBedController,
   deleteHostelBlockController,
   deleteHostelRoomController,
+  listHostelBedsController,
   listHostelBlocksController,
+  listHostelLogsController,
   listHostelRoomsController,
+  listRoomStudentsController,
   updateHostelBlockController,
   updateHostelRoomController,
 } from "../../modules/hostel/hostel.controller.js";
@@ -323,6 +328,7 @@ import {
   createTransportRouteController,
   deleteTransportRouteController,
   listRouteStudentsController,
+  listTransportLogsController,
   listTransportRoutesController,
   updateTransportRouteController,
 } from "../../modules/transport/transport.controller.js";
@@ -449,6 +455,11 @@ campusRouter.get(
   requirePermission("transport.view"),
   asyncHandler(listRouteStudentsController),
 );
+campusRouter.get(
+  "/transport/logs",
+  requirePermission("transport.view"),
+  asyncHandler(listTransportLogsController),
+);
 campusRouter.post(
   "/transport/assign",
   requirePermission("transport.manage"),
@@ -494,6 +505,31 @@ campusRouter.delete(
   "/hostel/rooms/:id",
   requirePermission("hostel.manage"),
   asyncHandler(deleteHostelRoomController),
+);
+campusRouter.get(
+  "/hostel/rooms/:id/students",
+  requirePermission("hostel.view"),
+  asyncHandler(listRoomStudentsController),
+);
+campusRouter.get(
+  "/hostel/beds",
+  requirePermission("hostel.view"),
+  asyncHandler(listHostelBedsController),
+);
+campusRouter.post(
+  "/hostel/beds",
+  requirePermission("hostel.manage"),
+  asyncHandler(createHostelBedController),
+);
+campusRouter.delete(
+  "/hostel/beds/:id",
+  requirePermission("hostel.manage"),
+  asyncHandler(deleteHostelBedController),
+);
+campusRouter.get(
+  "/hostel/logs",
+  requirePermission("hostel.view"),
+  asyncHandler(listHostelLogsController),
 );
 campusRouter.post(
   "/hostel/assign",

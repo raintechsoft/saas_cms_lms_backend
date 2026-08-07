@@ -2,18 +2,29 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import {
   assignStudentToRoom,
+  createHostelBed,
   createHostelBlock,
   createHostelRoom,
+  deleteHostelBed,
   deleteHostelBlock,
   deleteHostelRoom,
+  listHostelAllocationLogs,
+  listHostelBeds,
   listHostelBlocks,
   listHostelRooms,
+  listRoomStudents,
   updateHostelBlock,
   updateHostelRoom,
 } from "./hostel.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
 const roomsQuery = z.object({ blockId: z.string().min(1).optional() });
+const bedsQuery = z.object({ roomId: z.string().min(1).optional() });
+const logsQuery = z.object({
+  studentId: z.string().min(1).optional(),
+  roomId: z.string().min(1).optional(),
+  take: z.coerce.number().int().positive().max(200).optional(),
+});
 
 const blockBody = z.object({
   name: z.string().trim().min(1).max(120),
@@ -34,9 +45,18 @@ const roomUpdateBody = roomBody.omit({ blockId: true }).partial().extend({
   blockId: z.string().min(1).optional(),
 });
 
+const bedBody = z.object({
+  roomId: z.string().min(1),
+  label: z.string().trim().min(1).max(40),
+  isActive: z.boolean().optional(),
+});
+
 const assignBody = z.object({
   studentId: z.string().min(1),
   roomId: z.string().min(1).nullable(),
+  bedId: z.string().min(1).nullable().optional(),
+  note: z.string().trim().max(500).nullable().optional(),
+  enforceGender: z.boolean().optional(),
 });
 
 export async function listHostelBlocksController(req: Request, res: Response) {
@@ -86,9 +106,43 @@ export async function deleteHostelRoomController(req: Request, res: Response) {
   res.status(204).send();
 }
 
+export async function listHostelBedsController(req: Request, res: Response) {
+  const { roomId } = bedsQuery.parse(req.query);
+  res.json({ data: await listHostelBeds(req.auth!.tenantId!, roomId) });
+}
+
+export async function createHostelBedController(req: Request, res: Response) {
+  res.status(201).json({
+    data: await createHostelBed(req.auth!.tenantId!, bedBody.parse(req.body)),
+  });
+}
+
+export async function deleteHostelBedController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  await deleteHostelBed(req.auth!.tenantId!, id);
+  res.status(204).send();
+}
+
+export async function listRoomStudentsController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await listRoomStudents(req.auth!.tenantId!, id) });
+}
+
+export async function listHostelLogsController(req: Request, res: Response) {
+  const query = logsQuery.parse(req.query);
+  res.json({
+    data: await listHostelAllocationLogs(req.auth!.tenantId!, query),
+  });
+}
+
 export async function assignHostelStudentController(req: Request, res: Response) {
   const body = assignBody.parse(req.body);
   res.json({
-    data: await assignStudentToRoom(req.auth!.tenantId!, body.studentId, body.roomId),
+    data: await assignStudentToRoom(req.auth!.tenantId!, body.studentId, body.roomId, {
+      bedId: body.bedId,
+      note: body.note,
+      enforceGender: body.enforceGender,
+      assignedById: req.auth!.userId,
+    }),
   });
 }

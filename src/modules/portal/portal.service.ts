@@ -59,6 +59,7 @@ function mapStudentProfile(student: AccessibleStudent) {
     admissionType: student.admissionType,
     transportOptIn: student.transportOptIn,
     transportRoute: student.transportRoute,
+    transportStopName: student.transportStopName,
     transport: student.transportRouteRef
       ? {
           routeId: student.transportRouteRef.id,
@@ -67,16 +68,20 @@ function mapStudentProfile(student: AccessibleStudent) {
           vehicleNumber: student.transportRouteRef.vehicleNumber,
           driverName: student.transportRouteRef.driverName,
           driverPhone: student.transportRouteRef.driverPhone,
+          stopName: student.transportStopName,
         }
       : null,
     hostelOptIn: student.hostelOptIn,
     hostelRoom: student.hostelRoom,
+    hostelBedId: student.hostelBedId,
     hostel: student.hostelRoomRef
       ? {
           roomId: student.hostelRoomRef.id,
           roomName: student.hostelRoomRef.name,
           blockId: student.hostelRoomRef.block.id,
           blockName: student.hostelRoomRef.block.name,
+          bedId: student.hostelBedId,
+          bedLabel: student.hostelBedRef?.label ?? null,
         }
       : null,
     additionalNotes: student.additionalNotes,
