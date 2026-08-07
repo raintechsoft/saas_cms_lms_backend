@@ -214,6 +214,8 @@ export const TENANT_MODULE_KEYS = [
   "erp",
   "timetable",
   "reports",
+  "transport",
+  "hostel",
 ] as const;
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
