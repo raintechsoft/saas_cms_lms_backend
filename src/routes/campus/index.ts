@@ -110,7 +110,9 @@ import {
   unsubscribePushController,
 } from "../../modules/notifications/notifications.controller.js";
 import {
+  getSchoolProfileController,
   getSettingsController,
+  updateSchoolProfileController,
   updateSettingsController,
 } from "../../modules/settings/settings.controller.js";
 import {
@@ -413,6 +415,16 @@ campusRouter.put(
   "/settings",
   requirePermission("settings.manage"),
   asyncHandler(updateSettingsController),
+);
+campusRouter.get(
+  "/settings/school-profile",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getSchoolProfileController),
+);
+campusRouter.put(
+  "/settings/school-profile",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(updateSchoolProfileController),
 );
 
 campusRouter.get(
