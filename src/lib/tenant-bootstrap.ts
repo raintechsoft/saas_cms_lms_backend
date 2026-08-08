@@ -125,6 +125,10 @@ export async function ensureInstitutionAdminRole(tenantId: string, client: DbCli
   for (const [key, description] of [
     ["library.view", "View library books and loans"],
     ["library.manage", "Manage library books and issue/return"],
+    ["inventory.view", "View inventory stock and movements"],
+    ["inventory.manage", "Manage inventory stock and issue items"],
+    ["online_exam.view", "View online exams, attempts, and ranks"],
+    ["online_exam.manage", "Manage online exams, questions, attempts, and grading"],
     ["transport.view", "View transport routes and assignments"],
     ["transport.manage", "Manage transport routes and assignments"],
     ["hostel.view", "View hostel blocks, rooms, and assignments"],
@@ -157,7 +161,7 @@ export async function ensureInstitutionAdminRole(tenantId: string, client: DbCli
     });
   }
 
-  for (const moduleKey of ["library", "transport", "hostel"] as const) {
+  for (const moduleKey of ["library", "inventory", "onlineExam", "transport", "hostel"] as const) {
     await client.tenantModuleSetting.upsert({
       where: { tenantId_moduleKey: { tenantId, moduleKey } },
       update: {},

@@ -49,14 +49,6 @@ export type ExtendedReportKey =
 const STUB_MESSAGE = "Module not enabled in this build";
 
 const STUB_KEYS = new Set<ExtendedReportKey>([
-  "stock",
-  "add_item",
-  "issue_item",
-  "online_exam_wise",
-  "online_exams",
-  "online_attempt",
-  "online_rank",
-  "subjective_marks",
   "syllabus_status",
   "subject_lesson_plan",
 ]);
@@ -98,14 +90,14 @@ const CATALOG: ReportCatalogItem[] = [
   { section: "library", key: "book_due", label: "Book Due Report", description: "Overdue library books", available: true },
   { section: "library", key: "book_inventory", label: "Book Inventory Report", description: "Library inventory", available: true },
   { section: "library", key: "book_return", label: "Book Return Report", description: "Returned library books", available: true },
-  { section: "inventory", key: "stock", label: "Stock Report", description: "Inventory stock levels", available: false },
-  { section: "inventory", key: "add_item", label: "Add Item Report", description: "Items added to inventory", available: false },
-  { section: "inventory", key: "issue_item", label: "Issue Item Report", description: "Items issued from inventory", available: false },
-  { section: "onlineExam", key: "online_exam_wise", label: "Online Exam Wise Report", description: "Online exam summary", available: false },
-  { section: "onlineExam", key: "online_exams", label: "Online Exams Report", description: "All online exams", available: false },
-  { section: "onlineExam", key: "online_attempt", label: "Online Attempt Report", description: "Student online exam attempts", available: false },
-  { section: "onlineExam", key: "online_rank", label: "Online Rank Report", description: "Online exam ranks", available: false },
-  { section: "onlineExam", key: "subjective_marks", label: "Subjective Marks Report", description: "Subjective exam marks", available: false },
+  { section: "inventory", key: "stock", label: "Stock Report", description: "Inventory stock levels", available: true },
+  { section: "inventory", key: "add_item", label: "Add Item Report", description: "Items added to inventory", available: true },
+  { section: "inventory", key: "issue_item", label: "Issue Item Report", description: "Items issued from inventory", available: true },
+  { section: "onlineExam", key: "online_exam_wise", label: "Online Exam Wise Report", description: "Online exam summary", available: true },
+  { section: "onlineExam", key: "online_exams", label: "Online Exams Report", description: "All online exams", available: true },
+  { section: "onlineExam", key: "online_attempt", label: "Online Attempt Report", description: "Student online exam attempts", available: true },
+  { section: "onlineExam", key: "online_rank", label: "Online Rank Report", description: "Online exam ranks", available: true },
+  { section: "onlineExam", key: "subjective_marks", label: "Subjective Marks Report", description: "Subjective exam marks", available: true },
   { section: "lessonPlan", key: "syllabus_status", label: "Syllabus Status Report", description: "Syllabus completion status", available: false },
   { section: "lessonPlan", key: "subject_lesson_plan", label: "Subject Lesson Plan Report", description: "Subject-wise lesson plans", available: false },
 ];
@@ -127,11 +119,12 @@ export function getExamReports() {
 }
 
 export function getUnavailableReports() {
+  const unavailable = CATALOG.filter((item) => !item.available);
   return {
-    library: CATALOG.filter((item) => item.section === "library"),
-    inventory: CATALOG.filter((item) => item.section === "inventory"),
-    onlineExam: CATALOG.filter((item) => item.section === "onlineExam"),
-    lessonPlan: CATALOG.filter((item) => item.section === "lessonPlan"),
+    library: unavailable.filter((item) => item.section === "library"),
+    inventory: unavailable.filter((item) => item.section === "inventory"),
+    onlineExam: unavailable.filter((item) => item.section === "onlineExam"),
+    lessonPlan: unavailable.filter((item) => item.section === "lessonPlan"),
   };
 }
 
@@ -612,6 +605,304 @@ export async function runExtendedReport(
         totalCopies: book.totalCopies,
         availableCopies: book.availableCopies,
         isActive: book.isActive,
+      })),
+    };
+  }
+
+  if (reportKey === "stock") {
+    const items = await prisma.inventoryItem.findMany({
+      where: tenantScope(tenantId, {}),
+      include: { category: { select: { name: true } } },
+      orderBy: [{ name: "asc" }],
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: {
+        total: items.length,
+        totalQuantity: items.reduce((sum, item) => sum + item.quantity, 0),
+        lowStock: items.filter((item) => item.quantity <= item.reorderLevel).length,
+      },
+      rows: items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        sku: item.sku,
+        category: item.category?.name ?? null,
+        unit: item.unit,
+        quantity: item.quantity,
+        reorderLevel: item.reorderLevel,
+        location: item.location,
+        lowStock: item.quantity <= item.reorderLevel,
+        isActive: item.isActive,
+      })),
+    };
+  }
+
+  if (reportKey === "add_item" || reportKey === "issue_item") {
+    const type = reportKey === "add_item" ? "ADD" : "ISSUE";
+    const movements = await prisma.inventoryMovement.findMany({
+      where: tenantScope(tenantId, {
+        type,
+        ...(query.from || query.to
+          ? {
+              createdAt: {
+                ...(query.from ? { gte: new Date(query.from) } : {}),
+                ...(query.to ? { lte: new Date(query.to) } : {}),
+              },
+            }
+          : {}),
+      }),
+      include: {
+        item: { select: { name: true, sku: true, unit: true } },
+        student: {
+          select: { admissionNumber: true, firstName: true, lastName: true },
+        },
+        createdBy: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: { total: movements.length },
+      rows: movements.map((row) => ({
+        id: row.id,
+        item: row.item.name,
+        sku: row.item.sku,
+        quantity: row.quantity,
+        unit: row.item.unit,
+        student: row.student
+          ? `${row.student.admissionNumber} · ${nameOf(row.student.firstName, row.student.lastName)}`
+          : null,
+        note: row.note,
+        by: row.createdBy ? nameOf(row.createdBy.firstName, row.createdBy.lastName) : null,
+        createdAt: row.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  if (reportKey === "online_exams") {
+    const exams = await prisma.onlineExam.findMany({
+      where: tenantScope(tenantId, {}),
+      include: {
+        academicSession: { select: { name: true } },
+        classSection: {
+          select: {
+            academicClass: { select: { name: true } },
+            section: { select: { name: true } },
+          },
+        },
+        _count: { select: { questions: true, attempts: true } },
+      },
+      orderBy: { title: "asc" },
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: {
+        total: exams.length,
+        published: exams.filter((exam) => exam.status === "PUBLISHED").length,
+      },
+      rows: exams.map((exam) => ({
+        id: exam.id,
+        title: exam.title,
+        status: exam.status,
+        durationMinutes: exam.durationMinutes,
+        maxAttempts: exam.maxAttempts,
+        passMarks: exam.passMarks,
+        session: exam.academicSession?.name ?? null,
+        classSection: exam.classSection
+          ? classSectionLabel(exam.classSection)
+          : null,
+        questions: exam._count.questions,
+        attempts: exam._count.attempts,
+        startsAt: exam.startsAt?.toISOString() ?? null,
+        endsAt: exam.endsAt?.toISOString() ?? null,
+        isActive: exam.isActive,
+      })),
+    };
+  }
+
+  if (reportKey === "online_exam_wise") {
+    const exams = await prisma.onlineExam.findMany({
+      where: tenantScope(tenantId, {}),
+      include: {
+        attempts: {
+          where: { status: { in: ["SUBMITTED", "GRADED"] } },
+          select: { score: true, maxScore: true, status: true },
+        },
+        _count: { select: { questions: true, attempts: true } },
+      },
+      orderBy: { title: "asc" },
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: { total: exams.length },
+      rows: exams.map((exam) => {
+        const scored = exam.attempts.filter((a) => a.score != null);
+        const avg =
+          scored.length > 0
+            ? scored.reduce((sum, a) => sum + Number(a.score), 0) / scored.length
+            : 0;
+        const passed = scored.filter(
+          (a) => Number(a.score) >= exam.passMarks,
+        ).length;
+        return {
+          id: exam.id,
+          title: exam.title,
+          status: exam.status,
+          questions: exam._count.questions,
+          attempts: exam._count.attempts,
+          submitted: exam.attempts.length,
+          averageScore: Number(avg.toFixed(2)),
+          passMarks: exam.passMarks,
+          passed,
+          passRate:
+            scored.length > 0
+              ? Number(((passed / scored.length) * 100).toFixed(1))
+              : 0,
+        };
+      }),
+    };
+  }
+
+  if (reportKey === "online_attempt") {
+    const attempts = await prisma.onlineExamAttempt.findMany({
+      where: tenantScope(tenantId, {
+        ...(query.from || query.to
+          ? {
+              startedAt: {
+                ...(query.from ? { gte: new Date(query.from) } : {}),
+                ...(query.to ? { lte: new Date(query.to) } : {}),
+              },
+            }
+          : {}),
+      }),
+      include: {
+        exam: { select: { title: true, passMarks: true } },
+        student: {
+          select: { admissionNumber: true, firstName: true, lastName: true },
+        },
+      },
+      orderBy: { startedAt: "desc" },
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: { total: attempts.length },
+      rows: attempts.map((row) => ({
+        id: row.id,
+        exam: row.exam.title,
+        admissionNumber: row.student.admissionNumber,
+        student: nameOf(row.student.firstName, row.student.lastName),
+        attemptNo: row.attemptNo,
+        status: row.status,
+        score: row.score != null ? Number(row.score) : null,
+        maxScore: row.maxScore != null ? Number(row.maxScore) : null,
+        passMarks: row.exam.passMarks,
+        passed:
+          row.score != null ? Number(row.score) >= row.exam.passMarks : null,
+        rank: row.rank,
+        startedAt: row.startedAt.toISOString(),
+        submittedAt: row.submittedAt?.toISOString() ?? null,
+      })),
+    };
+  }
+
+  if (reportKey === "online_rank") {
+    const attempts = await prisma.onlineExamAttempt.findMany({
+      where: tenantScope(tenantId, {
+        status: { in: ["SUBMITTED", "GRADED"] },
+        score: { not: null },
+      }),
+      include: {
+        exam: { select: { title: true, passMarks: true } },
+        student: {
+          select: { admissionNumber: true, firstName: true, lastName: true },
+        },
+      },
+      orderBy: [{ examId: "asc" }, { rank: "asc" }, { score: "desc" }],
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: { total: attempts.length },
+      rows: attempts.map((row) => ({
+        id: row.id,
+        exam: row.exam.title,
+        rank: row.rank,
+        admissionNumber: row.student.admissionNumber,
+        student: nameOf(row.student.firstName, row.student.lastName),
+        score: row.score != null ? Number(row.score) : null,
+        maxScore: row.maxScore != null ? Number(row.maxScore) : null,
+        passMarks: row.exam.passMarks,
+        status: row.status,
+      })),
+    };
+  }
+
+  if (reportKey === "subjective_marks") {
+    const answers = await prisma.onlineExamAnswer.findMany({
+      where: tenantScope(tenantId, {
+        question: { type: "SUBJECTIVE" },
+      }),
+      include: {
+        question: { select: { prompt: true, marks: true, sortOrder: true } },
+        attempt: {
+          include: {
+            exam: { select: { title: true } },
+            student: {
+              select: {
+                admissionNumber: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+        gradedBy: { select: { firstName: true, lastName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 1000,
+    });
+    return {
+      reportKey,
+      title: meta.label,
+      session,
+      summary: {
+        total: answers.length,
+        pending: answers.filter((row) => row.marksAwarded == null).length,
+      },
+      rows: answers.map((row) => ({
+        id: row.id,
+        exam: row.attempt.exam.title,
+        admissionNumber: row.attempt.student.admissionNumber,
+        student: nameOf(
+          row.attempt.student.firstName,
+          row.attempt.student.lastName,
+        ),
+        question: row.question.prompt.slice(0, 120),
+        maxMarks: row.question.marks,
+        textAnswer: row.textAnswer,
+        marksAwarded: row.marksAwarded != null ? Number(row.marksAwarded) : null,
+        gradedBy: row.gradedBy
+          ? nameOf(row.gradedBy.firstName, row.gradedBy.lastName)
+          : null,
+        gradedAt: row.gradedAt?.toISOString() ?? null,
+        attemptStatus: row.attempt.status,
       })),
     };
   }

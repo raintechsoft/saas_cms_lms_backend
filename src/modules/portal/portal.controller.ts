@@ -19,6 +19,14 @@ import {
   updatePortalStudentProfile,
   uploadPortalChildDocument,
 } from "./portal-detail.service.js";
+import {
+  getPortalOnlineAttempt,
+  getPortalOnlineExamPaper,
+  listPortalOnlineAttempts,
+  listPortalOnlineExams,
+  startPortalOnlineAttempt,
+  submitPortalOnlineAttempt,
+} from "./portal-online-exam.service.js";
 import { createNotice, deleteNotice, listNotices, updateNotice } from "../notices/notices.service.js";
 
 const studentParams = z.object({ studentId: z.string().min(1) });
@@ -78,6 +86,25 @@ const noticeBody = z.object({
   academicSessionId: z.string().min(1).nullable().optional(),
   classSectionId: z.string().min(1).nullable().optional(),
   expiresAt: z.coerce.date().nullable().optional(),
+});
+const onlineExamParams = z.object({
+  studentId: z.string().min(1),
+  examId: z.string().min(1),
+});
+const onlineAttemptParams = z.object({
+  studentId: z.string().min(1),
+  attemptId: z.string().min(1),
+});
+const onlineSubmitBody = z.object({
+  answers: z
+    .array(
+      z.object({
+        questionId: z.string().min(1),
+        selectedOption: z.coerce.number().int().min(0).max(9).nullable().optional(),
+        textAnswer: z.string().trim().max(20000).nullable().optional(),
+      }),
+    )
+    .max(200),
 });
 
 function viewer(req: Request) {
@@ -296,5 +323,85 @@ export async function updateCampusNoticeController(req: Request, res: Response) 
   const { id } = idParams.parse(req.params);
   res.json({
     data: await updateNotice(req.auth!.tenantId!, id, noticeBody.partial().parse(req.body)),
+  });
+}
+
+export async function listPortalOnlineExamsController(req: Request, res: Response) {
+  const { studentId } = studentParams.parse(req.params);
+  res.json({
+    data: await listPortalOnlineExams(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+    ),
+  });
+}
+
+export async function getPortalOnlineExamPaperController(req: Request, res: Response) {
+  const { studentId, examId } = onlineExamParams.parse(req.params);
+  res.json({
+    data: await getPortalOnlineExamPaper(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      examId,
+    ),
+  });
+}
+
+export async function startPortalOnlineAttemptController(req: Request, res: Response) {
+  const { studentId, examId } = onlineExamParams.parse(req.params);
+  res.status(201).json({
+    data: await startPortalOnlineAttempt(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      examId,
+    ),
+  });
+}
+
+export async function submitPortalOnlineAttemptController(req: Request, res: Response) {
+  const { studentId, attemptId } = onlineAttemptParams.parse(req.params);
+  const body = onlineSubmitBody.parse(req.body);
+  res.json({
+    data: await submitPortalOnlineAttempt(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      attemptId,
+      body.answers,
+    ),
+  });
+}
+
+export async function listPortalOnlineAttemptsController(req: Request, res: Response) {
+  const { studentId } = studentParams.parse(req.params);
+  const examId = typeof req.query.examId === "string" ? req.query.examId : undefined;
+  res.json({
+    data: await listPortalOnlineAttempts(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      examId,
+    ),
+  });
+}
+
+export async function getPortalOnlineAttemptController(req: Request, res: Response) {
+  const { studentId, attemptId } = onlineAttemptParams.parse(req.params);
+  res.json({
+    data: await getPortalOnlineAttempt(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      attemptId,
+    ),
   });
 }

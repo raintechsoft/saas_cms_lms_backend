@@ -16,6 +16,12 @@ import {
   getPortalTimetableController,
   listPortalNoticesController,
   listPortalTeachersController,
+  listPortalOnlineAttemptsController,
+  listPortalOnlineExamsController,
+  getPortalOnlineAttemptController,
+  getPortalOnlineExamPaperController,
+  startPortalOnlineAttemptController,
+  submitPortalOnlineAttemptController,
   submitPortalHomeworkController,
   submitPortalTeacherRatingController,
   updatePortalStudentProfileController,
@@ -66,6 +72,30 @@ portalRouter.post(
 );
 portalRouter.get("/children/:studentId/timetable", asyncHandler(getPortalTimetableController));
 portalRouter.get("/children/:studentId/homework", asyncHandler(getPortalHomeworkController));
+portalRouter.get(
+  "/children/:studentId/online-exams/attempts",
+  asyncHandler(listPortalOnlineAttemptsController),
+);
+portalRouter.get(
+  "/children/:studentId/online-exams/attempts/:attemptId",
+  asyncHandler(getPortalOnlineAttemptController),
+);
+portalRouter.post(
+  "/children/:studentId/online-exams/attempts/:attemptId/submit",
+  asyncHandler(submitPortalOnlineAttemptController),
+);
+portalRouter.get(
+  "/children/:studentId/online-exams",
+  asyncHandler(listPortalOnlineExamsController),
+);
+portalRouter.get(
+  "/children/:studentId/online-exams/:examId",
+  asyncHandler(getPortalOnlineExamPaperController),
+);
+portalRouter.post(
+  "/children/:studentId/online-exams/:examId/attempts",
+  asyncHandler(startPortalOnlineAttemptController),
+);
 portalRouter.get("/children/:studentId/teachers", asyncHandler(listPortalTeachersController));
 portalRouter.post(
   "/children/:studentId/teachers/:staffId/ratings",

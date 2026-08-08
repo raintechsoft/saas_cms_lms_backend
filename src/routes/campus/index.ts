@@ -324,6 +324,39 @@ import {
   updateHostelRoomController,
 } from "../../modules/hostel/hostel.controller.js";
 import {
+  addInventoryStockController,
+  createInventoryCategoryController,
+  createInventoryItemController,
+  deleteInventoryCategoryController,
+  deleteInventoryItemController,
+  inventorySummaryController,
+  issueInventoryItemController,
+  listInventoryCategoriesController,
+  listInventoryItemsController,
+  listInventoryMovementsController,
+  returnInventoryItemController,
+  updateInventoryCategoryController,
+  updateInventoryItemController,
+} from "../../modules/inventory/inventory.controller.js";
+import {
+  createOnlineExamController,
+  createOnlineQuestionController,
+  deleteOnlineExamController,
+  deleteOnlineQuestionController,
+  getOnlineExamController,
+  gradeSubjectiveAnswerController,
+  listExamRanksController,
+  listOnlineAttemptsController,
+  listOnlineExamsController,
+  listOnlineQuestionsController,
+  listPendingSubjectiveGradesController,
+  onlineExamSummaryController,
+  startOnlineAttemptController,
+  submitOnlineAttemptController,
+  updateOnlineExamController,
+  updateOnlineQuestionController,
+} from "../../modules/online-exam/online-exam.controller.js";
+import {
   createLibraryBookController,
   createLibraryCategoryController,
   deleteLibraryBookController,
@@ -368,6 +401,8 @@ campusRouter.use("/homework-reports", requireModule("homework"));
 campusRouter.use("/transport", requireEntitlement("CMS"), requireModule("transport"));
 campusRouter.use("/hostel", requireEntitlement("CMS"), requireModule("hostel"));
 campusRouter.use("/library", requireEntitlement("CMS"), requireModule("library"));
+campusRouter.use("/inventory", requireEntitlement("CMS"), requireModule("inventory"));
+campusRouter.use("/online-exams", requireEntitlement("CMS"), requireModule("onlineExam"));
 
 campusRouter.get(
   "/settings",
@@ -616,6 +651,153 @@ campusRouter.post(
   "/library/loans/:id/return",
   requirePermission("library.manage"),
   asyncHandler(returnLibraryBookController),
+);
+
+campusRouter.get(
+  "/inventory/summary",
+  requirePermission("inventory.view"),
+  asyncHandler(inventorySummaryController),
+);
+campusRouter.get(
+  "/inventory/categories",
+  requirePermission("inventory.view"),
+  asyncHandler(listInventoryCategoriesController),
+);
+campusRouter.post(
+  "/inventory/categories",
+  requirePermission("inventory.manage"),
+  asyncHandler(createInventoryCategoryController),
+);
+campusRouter.put(
+  "/inventory/categories/:id",
+  requirePermission("inventory.manage"),
+  asyncHandler(updateInventoryCategoryController),
+);
+campusRouter.delete(
+  "/inventory/categories/:id",
+  requirePermission("inventory.manage"),
+  asyncHandler(deleteInventoryCategoryController),
+);
+campusRouter.get(
+  "/inventory/items",
+  requirePermission("inventory.view"),
+  asyncHandler(listInventoryItemsController),
+);
+campusRouter.post(
+  "/inventory/items",
+  requirePermission("inventory.manage"),
+  asyncHandler(createInventoryItemController),
+);
+campusRouter.put(
+  "/inventory/items/:id",
+  requirePermission("inventory.manage"),
+  asyncHandler(updateInventoryItemController),
+);
+campusRouter.delete(
+  "/inventory/items/:id",
+  requirePermission("inventory.manage"),
+  asyncHandler(deleteInventoryItemController),
+);
+campusRouter.get(
+  "/inventory/movements",
+  requirePermission("inventory.view"),
+  asyncHandler(listInventoryMovementsController),
+);
+campusRouter.post(
+  "/inventory/stock/add",
+  requirePermission("inventory.manage"),
+  asyncHandler(addInventoryStockController),
+);
+campusRouter.post(
+  "/inventory/issue",
+  requirePermission("inventory.manage"),
+  asyncHandler(issueInventoryItemController),
+);
+campusRouter.post(
+  "/inventory/return",
+  requirePermission("inventory.manage"),
+  asyncHandler(returnInventoryItemController),
+);
+
+campusRouter.get(
+  "/online-exams/summary",
+  requirePermission("online_exam.view"),
+  asyncHandler(onlineExamSummaryController),
+);
+campusRouter.get(
+  "/online-exams/attempts/list",
+  requirePermission("online_exam.view"),
+  asyncHandler(listOnlineAttemptsController),
+);
+campusRouter.get(
+  "/online-exams/pending-grades",
+  requirePermission("online_exam.view"),
+  asyncHandler(listPendingSubjectiveGradesController),
+);
+campusRouter.post(
+  "/online-exams/attempts/start",
+  requirePermission("online_exam.manage"),
+  asyncHandler(startOnlineAttemptController),
+);
+campusRouter.post(
+  "/online-exams/attempts/:id/submit",
+  requirePermission("online_exam.manage"),
+  asyncHandler(submitOnlineAttemptController),
+);
+campusRouter.post(
+  "/online-exams/answers/:id/grade",
+  requirePermission("online_exam.manage"),
+  asyncHandler(gradeSubjectiveAnswerController),
+);
+campusRouter.put(
+  "/online-exams/questions/:id",
+  requirePermission("online_exam.manage"),
+  asyncHandler(updateOnlineQuestionController),
+);
+campusRouter.delete(
+  "/online-exams/questions/:id",
+  requirePermission("online_exam.manage"),
+  asyncHandler(deleteOnlineQuestionController),
+);
+campusRouter.get(
+  "/online-exams",
+  requirePermission("online_exam.view"),
+  asyncHandler(listOnlineExamsController),
+);
+campusRouter.post(
+  "/online-exams",
+  requirePermission("online_exam.manage"),
+  asyncHandler(createOnlineExamController),
+);
+campusRouter.get(
+  "/online-exams/:examId/questions",
+  requirePermission("online_exam.view"),
+  asyncHandler(listOnlineQuestionsController),
+);
+campusRouter.post(
+  "/online-exams/:examId/questions",
+  requirePermission("online_exam.manage"),
+  asyncHandler(createOnlineQuestionController),
+);
+campusRouter.get(
+  "/online-exams/:examId/ranks",
+  requirePermission("online_exam.view"),
+  asyncHandler(listExamRanksController),
+);
+campusRouter.get(
+  "/online-exams/:id",
+  requirePermission("online_exam.view"),
+  asyncHandler(getOnlineExamController),
+);
+campusRouter.put(
+  "/online-exams/:id",
+  requirePermission("online_exam.manage"),
+  asyncHandler(updateOnlineExamController),
+);
+campusRouter.delete(
+  "/online-exams/:id",
+  requirePermission("online_exam.manage"),
+  asyncHandler(deleteOnlineExamController),
 );
 
 campusRouter.get(

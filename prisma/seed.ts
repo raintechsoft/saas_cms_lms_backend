@@ -55,6 +55,10 @@ const permissions = [
   ["hostel.manage", "Manage hostel blocks, rooms, and assignments"],
   ["library.view", "View library books and loans"],
   ["library.manage", "Manage library books and issue/return"],
+  ["inventory.view", "View inventory stock and movements"],
+  ["inventory.manage", "Manage inventory stock and issue items"],
+  ["online_exam.view", "View online exams, attempts, and ranks"],
+  ["online_exam.manage", "Manage online exams, questions, attempts, and grading"],
 ] as const;
 
 async function main() {
@@ -1196,6 +1200,8 @@ async function main() {
     "transport",
     "hostel",
     "library",
+    "inventory",
+    "onlineExam",
     "notices",
   ]) {
     await prisma.tenantModuleSetting.upsert({

@@ -327,6 +327,13 @@ model Tenant {
   libraryCategories      LibraryCategory[]
   libraryBooks           LibraryBook[]
   libraryLoans           LibraryLoan[]
+  inventoryCategories    InventoryCategory[]
+  inventoryItems         InventoryItem[]
+  inventoryMovements     InventoryMovement[]
+  onlineExams            OnlineExam[]
+  onlineExamQuestions    OnlineExamQuestion[]
+  onlineExamAttempts     OnlineExamAttempt[]
+  onlineExamAnswers      OnlineExamAnswer[]
   attendanceRecords      AttendanceRecord[]
   studentLeaves          StudentLeave[]
   attendancePoints       AttendancePoint[]
@@ -411,6 +418,10 @@ model User {
   hostelAllocationsMade    HostelAllocationLog[]        @relation("HostelAllocationActor")
   libraryLoansIssued       LibraryLoan[]                @relation("LibraryLoanIssuer")
   libraryLoansReturned     LibraryLoan[]                @relation("LibraryLoanReturner")
+  inventoryMovementsMade   InventoryMovement[]          @relation("InventoryMovementActor")
+  onlineExamsCreated       OnlineExam[]                 @relation("OnlineExamCreator")
+  onlineExamAttemptsGraded OnlineExamAttempt[]          @relation("OnlineExamAttemptGrader")
+  onlineExamAnswersGraded  OnlineExamAnswer[]           @relation("OnlineExamAnswerGrader")
   attendanceMarked         AttendanceRecord[]           @relation("AttendanceMarker")
   leavesReviewed           StudentLeave[]               @relation("LeaveReviewer")
   pointsAwarded            AttendancePoint[]            @relation("PointAwarder")
@@ -516,6 +527,7 @@ model AcademicSession {
   payrolls          Payroll[]
   timetableEntries  TimetableEntry[]
   homework          Homework[]
+  onlineExams       OnlineExam[]
   holidays          Holiday[]
   onlineAdmissions  OnlineAdmissionApplication[]
   notices           Notice[]
@@ -661,6 +673,8 @@ model Student {
   transportAssignmentLogs TransportAssignmentLog[]
   hostelAllocationLogs    HostelAllocationLog[]
   libraryLoans            LibraryLoan[]
+  inventoryIssues         InventoryMovement[]
+  onlineExamAttempts      OnlineExamAttempt[]
 
   @@unique([tenantId, admissionNumber])
   @@index([tenantId, status])
@@ -730,6 +744,7 @@ model ClassSection {
   examSchedules     ExamSchedule[]
   timetableEntries  TimetableEntry[]
   homework          Homework[]
+  onlineExams       OnlineExam[]
   onlineAdmissions  OnlineAdmissionApplication[]
   notices           Notice[]
   notifications     Notification[]
@@ -1333,6 +1348,190 @@ model LibraryLoan {
   @@index([tenantId, studentId, issuedAt])
   @@index([tenantId, bookId, status])
   @@map("library_loans")
+}
+
+enum InventoryMovementType {
+  ADD
+  ISSUE
+  RETURN
+  ADJUST
+}
+
+model InventoryCategory {
+  id        String          @id @default(cuid())
+  tenantId  String          @map("tenant_id")
+  name      String
+  isActive  Boolean         @default(true) @map("is_active")
+  notes     String?         @db.Text
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items     InventoryItem[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, isActive])
+  @@map("inventory_categories")
+}
+
+model InventoryItem {
+  id           String              @id @default(cuid())
+  tenantId     String              @map("tenant_id")
+  categoryId   String?             @map("category_id")
+  name         String
+  sku          String?
+  unit         String?             @default("pcs")
+  quantity     Int                 @default(0)
+  reorderLevel Int                 @default(0) @map("reorder_level")
+  location     String?
+  isActive     Boolean             @default(true) @map("is_active")
+  notes        String?             @db.Text
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category     InventoryCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  movements    InventoryMovement[]
+
+  @@unique([tenantId, sku])
+  @@index([tenantId, isActive])
+  @@index([tenantId, name])
+  @@map("inventory_items")
+}
+
+model InventoryMovement {
+  id          String                @id @default(cuid())
+  tenantId    String                @map("tenant_id")
+  itemId      String                @map("item_id")
+  type        InventoryMovementType
+  quantity    Int
+  studentId   String?               @map("student_id")
+  note        String?
+  createdById String?               @map("created_by_id")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  tenant      Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item        InventoryItem         @relation(fields: [itemId], references: [id], onDelete: Restrict)
+  student     Student?              @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  createdBy   User?                 @relation("InventoryMovementActor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, type, createdAt])
+  @@index([tenantId, itemId, createdAt])
+  @@index([tenantId, studentId])
+  @@map("inventory_movements")
+}
+
+enum OnlineExamStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum OnlineQuestionType {
+  MCQ
+  SUBJECTIVE
+}
+
+enum OnlineAttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+}
+
+model OnlineExam {
+  id              String               @id @default(cuid())
+  tenantId        String               @map("tenant_id")
+  academicSessionId String?            @map("academic_session_id")
+  classSectionId  String?              @map("class_section_id")
+  title           String
+  description     String?              @db.Text
+  durationMinutes Int                  @default(60) @map("duration_minutes")
+  maxAttempts     Int                  @default(1) @map("max_attempts")
+  passMarks       Int                  @default(0) @map("pass_marks")
+  status          OnlineExamStatus     @default(DRAFT)
+  startsAt        DateTime?            @map("starts_at")
+  endsAt          DateTime?            @map("ends_at")
+  isActive        Boolean              @default(true) @map("is_active")
+  createdById     String?              @map("created_by_id")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicSession AcademicSession?     @relation(fields: [academicSessionId], references: [id], onDelete: SetNull)
+  classSection    ClassSection?        @relation(fields: [classSectionId], references: [id], onDelete: SetNull)
+  createdBy       User?                @relation("OnlineExamCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  questions       OnlineExamQuestion[]
+  attempts        OnlineExamAttempt[]
+
+  @@index([tenantId, status, isActive])
+  @@index([tenantId, title])
+  @@map("online_exams")
+}
+
+model OnlineExamQuestion {
+  id            String             @id @default(cuid())
+  tenantId      String             @map("tenant_id")
+  examId        String             @map("exam_id")
+  type          OnlineQuestionType
+  prompt        String             @db.Text
+  options       Json?
+  correctOption Int?               @map("correct_option")
+  marks         Int                @default(1)
+  sortOrder     Int                @default(0) @map("sort_order")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  exam          OnlineExam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  answers       OnlineExamAnswer[]
+
+  @@index([tenantId, examId, sortOrder])
+  @@map("online_exam_questions")
+}
+
+model OnlineExamAttempt {
+  id          String              @id @default(cuid())
+  tenantId    String              @map("tenant_id")
+  examId      String              @map("exam_id")
+  studentId   String              @map("student_id")
+  attemptNo   Int                 @default(1) @map("attempt_no")
+  status      OnlineAttemptStatus @default(IN_PROGRESS)
+  startedAt   DateTime            @default(now()) @map("started_at")
+  submittedAt DateTime?           @map("submitted_at")
+  score       Decimal?            @db.Decimal(10, 2)
+  maxScore    Decimal?            @map("max_score") @db.Decimal(10, 2)
+  rank        Int?
+  gradedById  String?             @map("graded_by_id")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  exam        OnlineExam          @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student     Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  gradedBy    User?               @relation("OnlineExamAttemptGrader", fields: [gradedById], references: [id], onDelete: SetNull)
+  answers     OnlineExamAnswer[]
+
+  @@unique([tenantId, examId, studentId, attemptNo])
+  @@index([tenantId, examId, status])
+  @@index([tenantId, studentId])
+  @@map("online_exam_attempts")
+}
+
+model OnlineExamAnswer {
+  id            String             @id @default(cuid())
+  tenantId      String             @map("tenant_id")
+  attemptId     String             @map("attempt_id")
+  questionId    String             @map("question_id")
+  selectedOption Int?              @map("selected_option")
+  textAnswer    String?            @map("text_answer") @db.Text
+  marksAwarded  Decimal?           @map("marks_awarded") @db.Decimal(10, 2)
+  isCorrect     Boolean?           @map("is_correct")
+  gradedAt      DateTime?          @map("graded_at")
+  gradedById    String?            @map("graded_by_id")
+  createdAt     DateTime           @default(now()) @map("created_at")
+  updatedAt     DateTime           @updatedAt @map("updated_at")
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  attempt       OnlineExamAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question      OnlineExamQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  gradedBy      User?              @relation("OnlineExamAnswerGrader", fields: [gradedById], references: [id], onDelete: SetNull)
+
+  @@unique([attemptId, questionId])
+  @@index([tenantId, questionId])
+  @@map("online_exam_answers")
 }
 
 model FeeFineRange {
