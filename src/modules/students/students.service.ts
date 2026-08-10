@@ -232,7 +232,8 @@ export async function createStudent(tenantId: string, input: StudentInput) {
         data: { nextAdmissionNumber: { increment: 1 } },
       });
       const sequence = setting.nextAdmissionNumber - 1;
-      admissionNumber = `${setting.admissionPrefix ?? ""}${sequence}`;
+      const digits = Math.max(1, setting.admissionNumberDigits ?? 5);
+      admissionNumber = `${setting.admissionPrefix ?? ""}${String(sequence).padStart(digits, "0")}`;
     }
 
     const studentEmail =

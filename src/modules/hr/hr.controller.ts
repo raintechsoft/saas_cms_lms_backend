@@ -47,11 +47,35 @@ import {
 const idParams = z.object({ id: z.string().min(1) });
 const nameBody = z.object({ name: z.string().trim().min(1).max(100) });
 const leaveTypeBody = nameBody.extend({
-  annualLimit: z.coerce.number().int().positive().max(366).nullable().optional(),
+  annualLimit: z.coerce.number().int().min(0).max(366).nullable().optional(),
+  code: z.string().trim().max(20).nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  isPaid: z.boolean().optional(),
+  applicableTo: z.string().trim().min(1).max(40).optional(),
+  isActive: z.boolean().optional(),
+  carryForward: z.boolean().optional(),
+  encashmentAllowed: z.boolean().optional(),
+  genderApplicability: z.string().trim().min(1).max(40).optional(),
+  allocationMethod: z.string().trim().min(1).max(40).optional(),
+  allocationFrequency: z.string().trim().min(1).max(40).optional(),
+  defaultAllocationDays: z.coerce.number().int().min(0).max(366).optional(),
+  accrualRate: z.coerce.number().min(0).max(100).optional(),
+  accrualBased: z.boolean().optional(),
+  effectiveFrom: z.coerce.date().nullable().optional(),
+  restriction: z.string().trim().min(1).max(60).optional(),
+  requireApproval: z.boolean().optional(),
+  applyOnWeekends: z.boolean().optional(),
+  applyOnHolidays: z.boolean().optional(),
+  allowHalfDay: z.boolean().optional(),
+  minimumNoticeDays: z.coerce.number().int().min(0).max(365).optional(),
+  documentRequired: z.string().trim().min(1).max(40).optional(),
 });
 const payParameterBody = z.object({
   name: z.string().trim().min(1).max(100),
+  shortCode: z.string().trim().max(20).nullable().optional(),
   type: z.nativeEnum(AdjustmentType),
+  taxable: z.boolean().optional(),
+  isActive: z.boolean().optional(),
   defaultAmount: z.coerce.number().min(0),
 });
 const payParameterUpdateBody = payParameterBody.partial();

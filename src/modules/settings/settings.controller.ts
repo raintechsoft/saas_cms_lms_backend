@@ -1,4 +1,9 @@
-import { AttendanceType, ExamResultType } from "@prisma/client";
+import {
+  AttendanceType,
+  ExamResultDisplayType,
+  ExamResultType,
+  OnlineExamViewMode,
+} from "@prisma/client";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { getSchoolProfile, updateSchoolProfile } from "./school-profile.service.js";
@@ -12,13 +17,24 @@ const updateSettingsSchema = z.object({
   timezone: z.string().trim().min(2).max(100).optional(),
   dateFormat: z.string().trim().min(4).max(30).optional(),
   attendanceType: z.nativeEnum(AttendanceType).optional(),
+  biometricAttendanceEnabled: z.boolean().optional(),
   autoAdmissionNumber: z.boolean().optional(),
   admissionPrefix: z.string().trim().max(20).nullable().optional(),
+  admissionNumberDigits: z.coerce.number().int().min(1).max(12).optional(),
+  nextAdmissionNumber: z.coerce.number().int().min(1).max(999_999_999).optional(),
   autoStaffNumber: z.boolean().optional(),
   staffPrefix: z.string().trim().max(20).nullable().optional(),
+  staffNumberDigits: z.coerce.number().int().min(1).max(12).optional(),
+  nextStaffNumber: z.coerce.number().int().min(1).max(999_999_999).optional(),
   teacherRestricted: z.boolean().optional(),
   examResultType: z.nativeEnum(ExamResultType).optional(),
+  examResultDisplayType: z.nativeEnum(ExamResultDisplayType).optional(),
+  onlineExamViewMode: z.nativeEnum(OnlineExamViewMode).optional(),
   onlineAdmission: z.boolean().optional(),
+  onlineAdmissionRequirePayment: z.boolean().optional(),
+  onlineAdmissionFeeTypeId: z
+    .preprocess((value) => (value === "" || value === undefined ? null : value), z.string().min(1).nullable())
+    .optional(),
   liveClassAutoAttendance: z.boolean().optional(),
   attendancePresentPoints: z.coerce.number().int().min(-100).max(100).optional(),
   attendanceHalfDayPoints: z.coerce.number().int().min(-100).max(100).optional(),

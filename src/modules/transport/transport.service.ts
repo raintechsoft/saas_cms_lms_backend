@@ -5,6 +5,7 @@ import { tenantScope } from "../../lib/tenant-scope.js";
 
 export type TransportStop = {
   name: string;
+  location?: string | null;
   sequence?: number;
   fare?: number | null;
   pickupTime?: string | null;
@@ -17,6 +18,8 @@ export type TransportRouteInput = {
   vehicleNumber?: string | null;
   driverName?: string | null;
   driverPhone?: string | null;
+  attendantName?: string | null;
+  color?: string | null;
   stops?: TransportStop[] | PrismaTypes.InputJsonValue | null;
   fareAmount?: number | null;
   isActive?: boolean;
@@ -38,6 +41,8 @@ export function normalizeStops(raw: unknown): TransportStop[] {
     const row = item as Record<string, unknown>;
     const name = typeof row.name === "string" ? row.name.trim() : "";
     if (!name) continue;
+    const location =
+      typeof row.location === "string" && row.location.trim() ? row.location.trim() : null;
     const sequence =
       typeof row.sequence === "number" && Number.isFinite(row.sequence)
         ? row.sequence
@@ -52,6 +57,7 @@ export function normalizeStops(raw: unknown): TransportStop[] {
       typeof row.dropTime === "string" && row.dropTime.trim() ? row.dropTime.trim() : null;
     stops.push({
       name,
+      location,
       sequence,
       fare: fare != null && Number.isFinite(fare) ? fare : null,
       pickupTime,
@@ -83,6 +89,8 @@ export async function createTransportRoute(tenantId: string, input: TransportRou
       vehicleNumber: input.vehicleNumber?.trim() || null,
       driverName: input.driverName?.trim() || null,
       driverPhone: input.driverPhone?.trim() || null,
+      attendantName: input.attendantName?.trim() || null,
+      color: input.color?.trim() || "#10B981",
       stops: stops.length ? stops : undefined,
       fareAmount: input.fareAmount ?? null,
       isActive: input.isActive ?? true,
@@ -119,6 +127,10 @@ export async function updateTransportRoute(
       ...(input.driverPhone !== undefined
         ? { driverPhone: input.driverPhone?.trim() || null }
         : {}),
+      ...(input.attendantName !== undefined
+        ? { attendantName: input.attendantName?.trim() || null }
+        : {}),
+      ...(input.color !== undefined ? { color: input.color?.trim() || "#10B981" } : {}),
       ...(stops !== undefined ? { stops: stops.length ? stops : Prisma.DbNull } : {}),
       ...(input.fareAmount !== undefined ? { fareAmount: input.fareAmount ?? null } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),

@@ -1,6 +1,7 @@
 import { env, isMsg91EnvConfigured } from "../config/env.js";
 import { AppError } from "./errors.js";
 import { getTenantIntegration } from "../modules/erp/erp.service.js";
+import { logSmsDelivery } from "../modules/erp/sms-gateway.service.js";
 
 function asString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -127,6 +128,7 @@ export async function sendSms(input: {
   tenantId: string;
   to: string;
   body: string;
+  category?: string;
 }) {
   const to = normalizeSmsNumber(input.to);
   const mobile = toMsg91Mobile(input.to);
@@ -138,6 +140,15 @@ export async function sendSms(input: {
 
   const credentials = await resolveMsg91Credentials(input.tenantId);
   if (!credentials) {
+    await logSmsDelivery({
+      tenantId: input.tenantId,
+      toNumber: to,
+      body,
+      status: "SKIPPED",
+      provider: null,
+      category: input.category ?? "GENERAL",
+      errorMessage: "SMS not configured",
+    }).catch(() => undefined);
     if (env.NODE_ENV === "production") {
       throw new AppError(503, "SMS delivery is not configured", "SMS_NOT_CONFIGURED");
     }
@@ -154,8 +165,26 @@ export async function sendSms(input: {
 
   if (!result.ok) {
     console.error(`[sms] MSG91 failed to=${mobile} source=${source}: ${result.text}`);
+    await logSmsDelivery({
+      tenantId: input.tenantId,
+      toNumber: to,
+      body,
+      status: "FAILED",
+      provider: "msg91",
+      category: input.category ?? "GENERAL",
+      errorMessage: result.text.slice(0, 500),
+    }).catch(() => undefined);
     throw new AppError(502, "Failed to send SMS", "SMS_SEND_FAILED");
   }
+
+  await logSmsDelivery({
+    tenantId: input.tenantId,
+    toNumber: to,
+    body,
+    status: "SUCCESS",
+    provider: "msg91",
+    category: input.category ?? "GENERAL",
+  }).catch(() => undefined);
 
   console.info(`[sms] Delivered to ${mobile} via MSG91 (${source}${templateId ? ", flow" : ", http"})`);
   return { delivered: true as const };

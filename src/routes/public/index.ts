@@ -3,6 +3,10 @@ import { Router } from "express";
 import { z } from "zod";
 import { asyncHandler } from "../../lib/errors.js";
 import {
+  receiveWhatsAppWebhookController,
+  verifyWhatsAppWebhookController,
+} from "../../modules/erp/whatsapp-gateway.controller.js";
+import {
   getPublicAdmissionForm,
   submitPublicAdmission,
 } from "../../modules/students/admissions.service.js";
@@ -24,6 +28,9 @@ const admissionBody = z.object({
 });
 
 export const publicRouter = Router();
+
+publicRouter.get("/whatsapp/webhook", asyncHandler(verifyWhatsAppWebhookController));
+publicRouter.post("/whatsapp/webhook", asyncHandler(receiveWhatsAppWebhookController));
 
 publicRouter.get(
   "/tenants/:slug/admission",

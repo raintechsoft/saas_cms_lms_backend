@@ -15,7 +15,7 @@ import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 
-function encryptSecrets(secrets: Record<string, string>) {
+export function encryptSecrets(secrets: Record<string, string>) {
   const key = createHash("sha256")
     .update(env.SETTINGS_ENCRYPTION_KEY ?? env.JWT_SECRET)
     .digest();
@@ -308,6 +308,57 @@ export async function upsertLanguage(
   });
 }
 
+export function listLanguages(tenantId: string) {
+  return prisma.tenantLanguage.findMany({
+    where: { tenantId },
+    orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+  });
+}
+
+export async function syncLanguages(
+  tenantId: string,
+  input: {
+    defaultCode: string;
+    languages: Array<{ code: string; name: string; isEnabled: boolean }>;
+  },
+) {
+  const defaultCode = input.defaultCode.trim().toLowerCase();
+  if (!input.languages.some((item) => item.code.toLowerCase() === defaultCode)) {
+    throw new AppError(400, "Working language must be included in the language list", "DEFAULT_LANGUAGE_MISSING");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.tenantLanguage.updateMany({
+      where: { tenantId },
+      data: { isDefault: false, isEnabled: false },
+    });
+
+    const saved = [];
+    for (const item of input.languages) {
+      const code = item.code.trim().toLowerCase();
+      const isDefault = code === defaultCode;
+      const record = await tx.tenantLanguage.upsert({
+        where: { tenantId_code: { tenantId, code } },
+        create: {
+          tenantId,
+          code,
+          name: item.name.trim(),
+          isEnabled: isDefault || item.isEnabled,
+          isDefault,
+        },
+        update: {
+          name: item.name.trim(),
+          isEnabled: isDefault || item.isEnabled,
+          isDefault,
+        },
+      });
+      saved.push(record);
+    }
+
+    return saved.sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name));
+  });
+}
+
 export function createCustomField(
   tenantId: string,
   input: {
@@ -427,15 +478,28 @@ export async function deleteHoliday(tenantId: string, id: string) {
 
 export async function createDocumentFolder(
   tenantId: string,
-  input: { name: string; parentId?: string | null },
+  input: {
+    name: string;
+    parentId?: string | null;
+    description?: string | null;
+    isActive?: boolean;
+  },
 ) {
   if (input.parentId) {
     const parent = await prisma.studentDocumentFolder.findFirst({
-      where: tenantScope(tenantId, { id: input.parentId }),
+      where: tenantScope(tenantId, { id: input.parentId, deletedAt: null }),
     });
     if (!parent) throw new AppError(400, "Parent folder is invalid", "INVALID_FOLDER");
   }
-  return prisma.studentDocumentFolder.create({ data: { tenantId, ...input } });
+  return prisma.studentDocumentFolder.create({
+    data: {
+      tenantId,
+      name: input.name,
+      parentId: input.parentId ?? null,
+      description: input.description?.trim() || null,
+      isActive: input.isActive ?? true,
+    },
+  });
 }
 
 export async function createStudentDocument(

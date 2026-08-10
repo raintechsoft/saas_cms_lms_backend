@@ -47,35 +47,41 @@ async function validateEntry(
     });
     if (!teacher) throw new AppError(400, "Teacher is invalid", "INVALID_TEACHER");
   }
-  const overlapWhere = {
-    weekday: input.weekday,
-    startTime: { lt: input.endTime },
-    endTime: { gt: input.startTime },
-    ...(excludeId ? { id: { not: excludeId } } : {}),
-  };
-  const [classConflict, teacherConflict] = await Promise.all([
-    prisma.timetableEntry.findFirst({
-      where: tenantScope(tenantId, {
-        academicSessionId: input.academicSessionId,
-        classSectionId: input.classSectionId,
-        ...overlapWhere,
+  const setting = await prisma.tenantSetting.findUnique({
+    where: { tenantId },
+    select: { allowPeriodOverlap: true },
+  });
+  if (!setting?.allowPeriodOverlap) {
+    const overlapWhere = {
+      weekday: input.weekday,
+      startTime: { lt: input.endTime },
+      endTime: { gt: input.startTime },
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+    };
+    const [classConflict, teacherConflict] = await Promise.all([
+      prisma.timetableEntry.findFirst({
+        where: tenantScope(tenantId, {
+          academicSessionId: input.academicSessionId,
+          classSectionId: input.classSectionId,
+          ...overlapWhere,
+        }),
       }),
-    }),
-    teacherId
-      ? prisma.timetableEntry.findFirst({
-          where: tenantScope(tenantId, {
-            academicSessionId: input.academicSessionId,
-            teacherId,
-            ...overlapWhere,
-          }),
-        })
-      : null,
-  ]);
-  if (classConflict) {
-    throw new AppError(409, "Class already has a period at this time", "CLASS_TIMETABLE_CONFLICT");
-  }
-  if (teacherConflict) {
-    throw new AppError(409, "Teacher already has a period at this time", "TEACHER_TIMETABLE_CONFLICT");
+      teacherId
+        ? prisma.timetableEntry.findFirst({
+            where: tenantScope(tenantId, {
+              academicSessionId: input.academicSessionId,
+              teacherId,
+              ...overlapWhere,
+            }),
+          })
+        : null,
+    ]);
+    if (classConflict) {
+      throw new AppError(409, "Class already has a period at this time", "CLASS_TIMETABLE_CONFLICT");
+    }
+    if (teacherConflict) {
+      throw new AppError(409, "Teacher already has a period at this time", "TEACHER_TIMETABLE_CONFLICT");
+    }
   }
   return { classSubject, teacherId };
 }

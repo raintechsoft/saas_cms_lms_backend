@@ -16,6 +16,7 @@ const idParams = z.object({ id: z.string().min(1) });
 
 const stopSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  location: z.string().trim().max(200).nullable().optional(),
   sequence: z.coerce.number().int().min(0).optional(),
   fare: z.coerce.number().min(0).nullable().optional(),
   pickupTime: z.string().trim().max(20).nullable().optional(),
@@ -28,6 +29,8 @@ const routeBody = z.object({
   vehicleNumber: z.string().trim().max(40).nullable().optional(),
   driverName: z.string().trim().max(120).nullable().optional(),
   driverPhone: z.string().trim().max(30).nullable().optional(),
+  attendantName: z.string().trim().max(120).nullable().optional(),
+  color: z.string().trim().max(20).nullable().optional(),
   stops: z.array(stopSchema).nullable().optional(),
   fareAmount: z.coerce.number().min(0).nullable().optional(),
   isActive: z.boolean().optional(),

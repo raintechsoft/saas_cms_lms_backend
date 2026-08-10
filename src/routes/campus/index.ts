@@ -10,14 +10,17 @@ import {
 } from "../../middleware/auth.middleware.js";
 import { auditTenantMutation } from "../../middleware/audit.middleware.js";
 import {
+  assignStaffToRoleController,
   createRoleController,
   createUserController,
   deleteRoleController,
   deleteUserController,
+  getStaffRolesSetupController,
   getUserController,
   listPermissionsController,
   listRolesController,
   listUsersController,
+  removeStaffFromRoleController,
   updateRoleController,
   updateUserController,
 } from "../../modules/access/access.controller.js";
@@ -38,6 +41,7 @@ import {
   deleteAcademicsTimetableEntryController,
   deleteElectiveCategoryController,
   deleteSchoolScholarController,
+  deleteSessionController,
   deleteSubjectGroupController,
   getAcademicReportCatalogController,
   getAcademicSetupController,
@@ -45,8 +49,11 @@ import {
   getElectiveAssignmentBoardController,
   getPromoteBoardController,
   listSchoolScholarsController,
+  listSessionsController,
   listSubjectGroupsController,
   promoteStudentsController,
+  reorderClassesController,
+  reorderSubjectsController,
   runAcademicReportController,
   saveStudentElectivesController,
   setCurrentSessionController,
@@ -56,6 +63,7 @@ import {
   updateElectiveCategoryController,
   updateSchoolScholarController,
   updateSectionController,
+  updateSessionController,
   updateSubjectController,
   updateSubjectGroupController,
 } from "../../modules/academics/academics.controller.js";
@@ -131,7 +139,9 @@ import {
   deleteFeeMasterController,
   deleteFeeTypeController,
   deleteReceiptBookController,
+  getFeeSettingsController,
   getFeeSetupController,
+  updateFeeSettingsController,
   getFeeReminderStatsController,
   getFeeSummaryController,
   getFeeInvoiceController,
@@ -160,6 +170,13 @@ import {
   getOnlineOrderController,
   getOnlinePaymentConfigController,
 } from "../../modules/fees/online-payments.controller.js";
+import {
+  copyMultiFeeBookController,
+  createMultiFeeBookController,
+  deleteMultiFeeBookController,
+  getMultiFeeBookSetupController,
+  updateMultiFeeBookController,
+} from "../../modules/fees/multi-fee-book.controller.js";
 import {
   awardAttendancePointsController,
   createLeaveController,
@@ -216,6 +233,16 @@ import {
   updateMarkComponentController,
 } from "../../modules/exams/exams.controller.js";
 import {
+  assignGradingScaleToClassesController,
+  createGradingScaleController,
+  createGradingScaleGradeController,
+  deleteGradingScaleController,
+  deleteGradingScaleGradeController,
+  getGradingScaleSetupController,
+  updateGradingScaleController,
+  updateGradingScaleGradeController,
+} from "../../modules/exams/grading-scale.controller.js";
+import {
   addStaffAdjustmentController,
   addTeacherRatingController,
   applyOwnStaffLeaveController,
@@ -252,6 +279,28 @@ import {
   updateStaffStatusController,
 } from "../../modules/hr/hr.controller.js";
 import {
+  createStaffWorkShiftController,
+  deleteStaffHolidayController,
+  deleteStaffWorkShiftController,
+  getStaffAttendanceSettingsController,
+  updateStaffAttendanceSettingsController,
+  updateStaffWorkShiftController,
+  upsertStaffHolidayController,
+} from "../../modules/hr/staff-attendance-settings.controller.js";
+import {
+  createLeaveTypeSettingsController,
+  deleteLeaveTypeSettingsController,
+  getLeaveTypesSetupController,
+  updateLeaveTypeSettingsController,
+} from "../../modules/hr/leave-types-settings.controller.js";
+import {
+  createPayComponentController,
+  deletePayComponentController,
+  getPayrollSettingsSetupController,
+  updatePayComponentController,
+  updatePayrollSettingsController,
+} from "../../modules/hr/payroll-settings.controller.js";
+import {
   createDocumentTemplateController,
   deleteDocumentTemplateController,
   generateDocumentController,
@@ -277,6 +326,16 @@ import {
   updateTimetableEntryController,
 } from "../../modules/timetable/timetable.controller.js";
 import {
+  createTimetablePeriodController,
+  createTimetableTemplateController,
+  deleteTimetablePeriodController,
+  deleteTimetableTemplateController,
+  getTimetablePeriodSetupController,
+  updateTimetablePeriodController,
+  updateTimetablePeriodSettingsController,
+  updateTimetableTemplateController,
+} from "../../modules/timetable/period-setup.controller.js";
+import {
   createHomeworkController,
   evaluateHomeworkSubmissionController,
   getHomeworkController,
@@ -287,6 +346,16 @@ import {
   submitHomeworkController,
   updateHomeworkController,
 } from "../../modules/homework/homework.controller.js";
+import {
+  createHomeworkTypeController,
+  createHomeworkWorkflowStatusController,
+  deleteHomeworkTypeController,
+  deleteHomeworkWorkflowStatusController,
+  getHomeworkSettingsSetupController,
+  updateHomeworkSettingsController,
+  updateHomeworkTypeController,
+  updateHomeworkWorkflowStatusController,
+} from "../../modules/homework/homework-settings.controller.js";
 import {
   createConfigurationBackupController,
   createCustomFieldController,
@@ -299,7 +368,9 @@ import {
   deletePaymentMethodController,
   deleteStudentDocumentController,
   getErpSetupController,
+  listLanguagesController,
   restoreConfigurationBackupController,
+  syncLanguagesController,
   updateCustomFieldController,
   updateIntegrationController,
   updatePaymentMethodController,
@@ -309,6 +380,160 @@ import {
   upsertShortcutController,
   upsertSystemFieldController,
 } from "../../modules/erp/erp.controller.js";
+import {
+  deletePaymentMethodSetupController,
+  getPaymentMethodsSetupController,
+  togglePaymentMethodSetupController,
+  upsertPaymentMethodSetupController,
+} from "../../modules/erp/payment-methods.controller.js";
+import {
+  createSystemBackupController,
+  deleteBackupScheduleController,
+  deleteSystemBackupController,
+  getBackupRestoreSetupController,
+  restoreSystemBackupController,
+  saveBackupSettingsController,
+  upsertBackupScheduleController,
+} from "../../modules/erp/backup-restore.controller.js";
+import {
+  createModuleSetupController,
+  deleteModuleSetupController,
+  getModulesSetupController,
+  toggleModuleSetupController,
+  upsertModuleSetupController,
+} from "../../modules/erp/modules-settings.controller.js";
+import {
+  deleteLibraryMemberTypeController,
+  deleteLibrarySettingsCategoryController,
+  getLibrarySettingsSetupController,
+  previewLibraryBarcodeController,
+  saveLibrarySettingsController,
+  upsertLibraryMemberTypeController,
+  upsertLibrarySettingsCategoryController,
+} from "../../modules/erp/library-settings.controller.js";
+import {
+  deleteTransportSettingsRouteController,
+  deleteTransportVehicleController,
+  getTransportSettingsSetupController,
+  saveTransportSettingsController,
+  upsertTransportSettingsRouteController,
+  upsertTransportVehicleController,
+} from "../../modules/erp/transport-settings.controller.js";
+import {
+  getSessionLoginPolicySetupController,
+  saveSessionLoginPolicyController,
+  terminateLoginSessionController,
+  terminateOtherLoginSessionsController,
+} from "../../modules/erp/session-login-policy.controller.js";
+import {
+  createCalendarHolidayController,
+  deleteCalendarHolidayController,
+  deleteHolidayGroupController,
+  exportHolidaysCalendarController,
+  getHolidaysCalendarSetupController,
+  saveHolidaySettingsController,
+  updateCalendarHolidayController,
+  upsertHolidayGroupController,
+} from "../../modules/erp/holidays-calendar.controller.js";
+import {
+  getTwoFactorSetupController,
+  saveTwoFactorSettingsController,
+} from "../../modules/erp/two-factor.controller.js";
+import {
+  deleteImportJobController,
+  exportDataController,
+  getDataImportExportSetupController,
+  runDataExportController,
+  runDataImportController,
+} from "../../modules/erp/data-import-export.controller.js";
+import {
+  deleteQuestionBankDifficultyController,
+  getQuestionBankSettingsController,
+  updateQuestionBankSettingsController,
+  upsertQuestionBankDifficultyController,
+} from "../../modules/erp/question-bank-settings.controller.js";
+import {
+  getStudentAccessSettingsController,
+  updateStudentAccessSettingsController,
+} from "../../modules/erp/student-access-settings.controller.js";
+import { getSystemFieldsSetupController } from "../../modules/erp/system-fields.controller.js";
+import {
+  getShortcutKeysSetupController,
+  resetShortcutKeysController,
+  saveShortcutKeysController,
+} from "../../modules/erp/shortcut-keys.controller.js";
+import {
+  createStudentDocsFolderController,
+  deleteStudentDocsFolderController,
+  getStudentDocsFoldersSetupController,
+  reorderStudentDocsFoldersController,
+  restoreStudentDocsFolderController,
+  updateStudentDocsFolderController,
+} from "../../modules/erp/student-docs-folders.controller.js";
+import {
+  getThemeBrandingSetupController,
+  saveThemeBrandingController,
+} from "../../modules/erp/theme-branding.controller.js";
+import {
+  createWebsiteMediaController,
+  createWebsitePageController,
+  deleteWebsiteBannerController,
+  deleteWebsiteMediaController,
+  deleteWebsiteMenuController,
+  deleteWebsiteMenuItemController,
+  deleteWebsitePageController,
+  getWebsiteCmsSetupController,
+  saveWebsiteSiteSettingsController,
+  updateWebsitePageController,
+  upsertWebsiteBannerController,
+  upsertWebsiteMenuController,
+  upsertWebsiteMenuItemController,
+} from "../../modules/erp/website-cms.controller.js";
+import {
+  cloneSmsTemplateController,
+  deleteSmsTemplateController,
+  getSmsGatewaySetupController,
+  saveSmsGatewayController,
+  testSmsGatewayController,
+  upsertSmsTemplateController,
+} from "../../modules/erp/sms-gateway.controller.js";
+import {
+  cloneEmailGatewayController,
+  deleteEmailGatewayController,
+  deleteEmailTemplateController,
+  getEmailGatewaySetupController,
+  testEmailGatewayController,
+  upsertEmailGatewayController,
+  upsertEmailTemplateController,
+} from "../../modules/erp/email-gateway.controller.js";
+import {
+  deleteWhatsAppTemplateController,
+  getWhatsAppGatewaySetupController,
+  saveWhatsAppGatewayController,
+  sendWhatsAppTestMessageController,
+  testWhatsAppConnectionController,
+  upsertWhatsAppTemplateController,
+} from "../../modules/erp/whatsapp-gateway.controller.js";
+import {
+  deletePushTopicController,
+  getPushGatewaySetupController,
+  savePushGatewayController,
+  testPushGatewayController,
+  upsertPushTopicController,
+} from "../../modules/erp/push-gateway.controller.js";
+import {
+  deleteNotificationTriggerController,
+  getNotificationTriggersSetupController,
+  testNotificationTriggerController,
+  toggleNotificationTriggerController,
+  upsertNotificationTriggerController,
+} from "../../modules/erp/notification-triggers.controller.js";
+import {
+  deleteMessageNoticeTemplateController,
+  getMessageNoticeTemplatesSetupController,
+  toggleMessageNoticeTemplateController,
+  upsertMessageNoticeTemplateController,
+} from "../../modules/erp/message-notice-templates.controller.js";
 import {
   assignHostelStudentController,
   createHostelBedController,
@@ -408,12 +633,12 @@ campusRouter.use("/online-exams", requireEntitlement("CMS"), requireModule("onli
 
 campusRouter.get(
   "/settings",
-  requirePermission("settings.view"),
+  requireAnyPermission("settings.view", "erp.view"),
   asyncHandler(getSettingsController),
 );
 campusRouter.put(
   "/settings",
-  requirePermission("settings.manage"),
+  requireAnyPermission("settings.manage", "erp.manage"),
   asyncHandler(updateSettingsController),
 );
 campusRouter.get(
@@ -825,6 +1050,21 @@ campusRouter.delete(
   requirePermission("roles.manage"),
   asyncHandler(deleteRoleController),
 );
+campusRouter.get(
+  "/erp/staff-roles-setup",
+  requireAnyPermission("roles.view", "erp.view", "settings.view", "hr.view"),
+  asyncHandler(getStaffRolesSetupController),
+);
+campusRouter.post(
+  "/erp/staff-roles/:id/assign",
+  requireAnyPermission("roles.manage", "erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(assignStaffToRoleController),
+);
+campusRouter.delete(
+  "/erp/staff-roles/:id/users/:userId",
+  requireAnyPermission("roles.manage", "erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(removeStaffFromRoleController),
+);
 campusRouter.get("/users", requirePermission("users.view"), asyncHandler(listUsersController));
 campusRouter.get("/users/:id", requirePermission("users.view"), asyncHandler(getUserController));
 campusRouter.post("/users", requirePermission("users.manage"), asyncHandler(createUserController));
@@ -833,57 +1073,82 @@ campusRouter.delete("/users/:id", requirePermission("users.manage"), asyncHandle
 
 campusRouter.get(
   "/academics/setup",
-  requirePermission("academics.view"),
+  requireAnyPermission("academics.view", "erp.view", "settings.view"),
   asyncHandler(getAcademicSetupController),
+);
+campusRouter.get(
+  "/academic-sessions",
+  requireAnyPermission("sessions.manage", "academics.view", "erp.view", "settings.view"),
+  asyncHandler(listSessionsController),
 );
 campusRouter.post(
   "/academic-sessions",
-  requirePermission("sessions.manage"),
+  requireAnyPermission("sessions.manage", "erp.manage", "settings.manage"),
   asyncHandler(createSessionController),
 );
 campusRouter.put(
+  "/academic-sessions/:id",
+  requireAnyPermission("sessions.manage", "erp.manage", "settings.manage"),
+  asyncHandler(updateSessionController),
+);
+campusRouter.put(
   "/academic-sessions/:id/current",
-  requirePermission("sessions.manage"),
+  requireAnyPermission("sessions.manage", "erp.manage", "settings.manage"),
   asyncHandler(setCurrentSessionController),
+);
+campusRouter.delete(
+  "/academic-sessions/:id",
+  requireAnyPermission("sessions.manage", "erp.manage", "settings.manage"),
+  asyncHandler(deleteSessionController),
 );
 campusRouter.post(
   "/academics/classes",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(createClassController),
 );
 campusRouter.put(
+  "/academics/classes/reorder",
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
+  asyncHandler(reorderClassesController),
+);
+campusRouter.put(
   "/academics/classes/:id",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(updateClassController),
 );
 campusRouter.post(
   "/academics/sections",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(createSectionController),
 );
 campusRouter.put(
   "/academics/sections/:id",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(updateSectionController),
 );
 campusRouter.post(
   "/academics/subjects",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(createSubjectController),
 );
 campusRouter.put(
+  "/academics/subjects/reorder",
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
+  asyncHandler(reorderSubjectsController),
+);
+campusRouter.put(
   "/academics/subjects/:id",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(updateSubjectController),
 );
 campusRouter.post(
   "/academics/class-sections",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(createClassSectionController),
 );
 campusRouter.put(
   "/academics/class-sections/:id",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(updateClassSectionController),
 );
 campusRouter.post(
@@ -1014,7 +1279,7 @@ campusRouter.delete(
 
 campusRouter.delete(
   "/academics/:resource/:id",
-  requirePermission("academics.manage"),
+  requireAnyPermission("academics.manage", "erp.manage", "settings.manage"),
   asyncHandler(deleteAcademicRecordController),
 );
 
@@ -1169,43 +1434,85 @@ campusRouter.delete(
 campusRouter.get(
   "/fees/setup",
   requireEntitlement("CMS"),
-  requirePermission("fees.view"),
+  requireAnyPermission("fees.view", "erp.view", "settings.view"),
   asyncHandler(getFeeSetupController),
+);
+campusRouter.get(
+  "/fees/settings",
+  requireEntitlement("CMS"),
+  requireAnyPermission("fees.view", "erp.view", "settings.view"),
+  asyncHandler(getFeeSettingsController),
+);
+campusRouter.put(
+  "/fees/settings",
+  requireEntitlement("CMS"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
+  asyncHandler(updateFeeSettingsController),
+);
+campusRouter.get(
+  "/fees/multi-fee-books/setup",
+  requireEntitlement("CMS"),
+  requireAnyPermission("fees.view", "erp.view", "settings.view"),
+  asyncHandler(getMultiFeeBookSetupController),
+);
+campusRouter.post(
+  "/fees/multi-fee-books",
+  requireEntitlement("CMS"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
+  asyncHandler(createMultiFeeBookController),
+);
+campusRouter.put(
+  "/fees/multi-fee-books/:id",
+  requireEntitlement("CMS"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
+  asyncHandler(updateMultiFeeBookController),
+);
+campusRouter.post(
+  "/fees/multi-fee-books/:id/copy",
+  requireEntitlement("CMS"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
+  asyncHandler(copyMultiFeeBookController),
+);
+campusRouter.delete(
+  "/fees/multi-fee-books/:id",
+  requireEntitlement("CMS"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
+  asyncHandler(deleteMultiFeeBookController),
 );
 campusRouter.post(
   "/fees/types",
   requireEntitlement("CMS"),
-  requirePermission("fees.manage"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
   asyncHandler(createFeeTypeController),
 );
 campusRouter.put(
   "/fees/types/:id",
   requireEntitlement("CMS"),
-  requirePermission("fees.manage"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
   asyncHandler(updateFeeTypeController),
 );
 campusRouter.delete(
   "/fees/types/:id",
   requireEntitlement("CMS"),
-  requirePermission("fees.manage"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
   asyncHandler(deleteFeeTypeController),
 );
 campusRouter.post(
   "/fees/groups",
   requireEntitlement("CMS"),
-  requirePermission("fees.manage"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
   asyncHandler(createFeeGroupController),
 );
 campusRouter.put(
   "/fees/groups/:id",
   requireEntitlement("CMS"),
-  requirePermission("fees.manage"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
   asyncHandler(updateFeeGroupController),
 );
 campusRouter.delete(
   "/fees/groups/:id",
   requireEntitlement("CMS"),
-  requirePermission("fees.manage"),
+  requireAnyPermission("fees.manage", "erp.manage", "settings.manage"),
   asyncHandler(deleteFeeGroupController),
 );
 campusRouter.post(
@@ -1801,6 +2108,91 @@ campusRouter.get(
   requirePermission("hr.view"),
   asyncHandler(getStaffAttendanceReportController),
 );
+campusRouter.get(
+  "/erp/staff-attendance-settings",
+  requireAnyPermission("erp.view", "settings.view", "hr.view"),
+  asyncHandler(getStaffAttendanceSettingsController),
+);
+campusRouter.put(
+  "/erp/staff-attendance-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(updateStaffAttendanceSettingsController),
+);
+campusRouter.post(
+  "/erp/staff-work-shifts",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(createStaffWorkShiftController),
+);
+campusRouter.put(
+  "/erp/staff-work-shifts/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(updateStaffWorkShiftController),
+);
+campusRouter.delete(
+  "/erp/staff-work-shifts/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(deleteStaffWorkShiftController),
+);
+campusRouter.post(
+  "/erp/staff-attendance-holidays",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(upsertStaffHolidayController),
+);
+campusRouter.put(
+  "/erp/staff-attendance-holidays/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(upsertStaffHolidayController),
+);
+campusRouter.delete(
+  "/erp/staff-attendance-holidays/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(deleteStaffHolidayController),
+);
+campusRouter.get(
+  "/erp/leave-types-setup",
+  requireAnyPermission("erp.view", "settings.view", "hr.view"),
+  asyncHandler(getLeaveTypesSetupController),
+);
+campusRouter.post(
+  "/erp/leave-types",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(createLeaveTypeSettingsController),
+);
+campusRouter.put(
+  "/erp/leave-types/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(updateLeaveTypeSettingsController),
+);
+campusRouter.delete(
+  "/erp/leave-types/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage"),
+  asyncHandler(deleteLeaveTypeSettingsController),
+);
+campusRouter.get(
+  "/erp/payroll-settings",
+  requireAnyPermission("erp.view", "settings.view", "hr.view", "payroll.view"),
+  asyncHandler(getPayrollSettingsSetupController),
+);
+campusRouter.put(
+  "/erp/payroll-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage", "payroll.manage"),
+  asyncHandler(updatePayrollSettingsController),
+);
+campusRouter.post(
+  "/erp/payroll-components",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage", "payroll.manage"),
+  asyncHandler(createPayComponentController),
+);
+campusRouter.put(
+  "/erp/payroll-components/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage", "payroll.manage"),
+  asyncHandler(updatePayComponentController),
+);
+campusRouter.delete(
+  "/erp/payroll-components/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "hr.manage", "payroll.manage"),
+  asyncHandler(deletePayComponentController),
+);
 campusRouter.post(
   "/hr/leaves",
   requireEntitlement("CMS"),
@@ -1984,6 +2376,56 @@ campusRouter.get(
   asyncHandler(getHomeworkSetupController),
 );
 campusRouter.get(
+  "/erp/student-access",
+  requireAnyPermission("erp.view", "settings.view", "students.view"),
+  asyncHandler(getStudentAccessSettingsController),
+);
+campusRouter.put(
+  "/erp/student-access",
+  requireAnyPermission("erp.manage", "settings.manage", "students.manage"),
+  asyncHandler(updateStudentAccessSettingsController),
+);
+campusRouter.get(
+  "/erp/homework-settings",
+  requireAnyPermission("erp.view", "settings.view", "homework.view"),
+  asyncHandler(getHomeworkSettingsSetupController),
+);
+campusRouter.put(
+  "/erp/homework-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "homework.manage"),
+  asyncHandler(updateHomeworkSettingsController),
+);
+campusRouter.post(
+  "/erp/homework-types",
+  requireAnyPermission("erp.manage", "settings.manage", "homework.manage"),
+  asyncHandler(createHomeworkTypeController),
+);
+campusRouter.put(
+  "/erp/homework-types/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "homework.manage"),
+  asyncHandler(updateHomeworkTypeController),
+);
+campusRouter.delete(
+  "/erp/homework-types/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "homework.manage"),
+  asyncHandler(deleteHomeworkTypeController),
+);
+campusRouter.post(
+  "/erp/homework-workflow-statuses",
+  requireAnyPermission("erp.manage", "settings.manage", "homework.manage"),
+  asyncHandler(createHomeworkWorkflowStatusController),
+);
+campusRouter.put(
+  "/erp/homework-workflow-statuses/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "homework.manage"),
+  asyncHandler(updateHomeworkWorkflowStatusController),
+);
+campusRouter.delete(
+  "/erp/homework-workflow-statuses/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "homework.manage"),
+  asyncHandler(deleteHomeworkWorkflowStatusController),
+);
+campusRouter.get(
   "/homework/:id",
   requirePermission("homework.view"),
   asyncHandler(getHomeworkController),
@@ -2030,6 +2472,109 @@ campusRouter.get(
 );
 
 campusRouter.get(
+  "/erp/question-bank-settings",
+  requireAnyPermission("erp.view", "settings.view", "online_exam.view", "exams.view"),
+  asyncHandler(getQuestionBankSettingsController),
+);
+campusRouter.put(
+  "/erp/question-bank-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "online_exam.manage", "exams.manage"),
+  asyncHandler(updateQuestionBankSettingsController),
+);
+campusRouter.put(
+  "/erp/question-bank-settings/difficulty",
+  requireAnyPermission("erp.manage", "settings.manage", "online_exam.manage", "exams.manage"),
+  asyncHandler(upsertQuestionBankDifficultyController),
+);
+campusRouter.delete(
+  "/erp/question-bank-settings/difficulty/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "online_exam.manage", "exams.manage"),
+  asyncHandler(deleteQuestionBankDifficultyController),
+);
+
+campusRouter.get(
+  "/erp/grading-scale-setup",
+  requireAnyPermission("erp.view", "settings.view", "exams.view", "academics.view"),
+  asyncHandler(getGradingScaleSetupController),
+);
+campusRouter.post(
+  "/erp/grading-scales",
+  requireAnyPermission("erp.manage", "settings.manage", "exams.manage", "academics.manage"),
+  asyncHandler(createGradingScaleController),
+);
+campusRouter.put(
+  "/erp/grading-scales/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "exams.manage", "academics.manage"),
+  asyncHandler(updateGradingScaleController),
+);
+campusRouter.delete(
+  "/erp/grading-scales/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "exams.manage", "academics.manage"),
+  asyncHandler(deleteGradingScaleController),
+);
+campusRouter.post(
+  "/erp/grading-scales/:scaleId/grades",
+  requireAnyPermission("erp.manage", "settings.manage", "exams.manage", "academics.manage"),
+  asyncHandler(createGradingScaleGradeController),
+);
+campusRouter.put(
+  "/erp/grading-scale-grades/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "exams.manage", "academics.manage"),
+  asyncHandler(updateGradingScaleGradeController),
+);
+campusRouter.delete(
+  "/erp/grading-scale-grades/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "exams.manage", "academics.manage"),
+  asyncHandler(deleteGradingScaleGradeController),
+);
+campusRouter.put(
+  "/erp/grading-scale-assignments",
+  requireAnyPermission("erp.manage", "settings.manage", "exams.manage", "academics.manage"),
+  asyncHandler(assignGradingScaleToClassesController),
+);
+
+campusRouter.get(
+  "/erp/timetable-period-setup",
+  requireAnyPermission("erp.view", "settings.view", "timetable.view", "academics.view"),
+  asyncHandler(getTimetablePeriodSetupController),
+);
+campusRouter.put(
+  "/erp/timetable-period-setup/settings",
+  requireAnyPermission("erp.manage", "settings.manage", "timetable.manage", "academics.manage"),
+  asyncHandler(updateTimetablePeriodSettingsController),
+);
+campusRouter.post(
+  "/erp/timetable-periods",
+  requireAnyPermission("erp.manage", "settings.manage", "timetable.manage", "academics.manage"),
+  asyncHandler(createTimetablePeriodController),
+);
+campusRouter.put(
+  "/erp/timetable-periods/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "timetable.manage", "academics.manage"),
+  asyncHandler(updateTimetablePeriodController),
+);
+campusRouter.delete(
+  "/erp/timetable-periods/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "timetable.manage", "academics.manage"),
+  asyncHandler(deleteTimetablePeriodController),
+);
+campusRouter.post(
+  "/erp/timetable-templates",
+  requireAnyPermission("erp.manage", "settings.manage", "timetable.manage", "academics.manage"),
+  asyncHandler(createTimetableTemplateController),
+);
+campusRouter.put(
+  "/erp/timetable-templates/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "timetable.manage", "academics.manage"),
+  asyncHandler(updateTimetableTemplateController),
+);
+campusRouter.delete(
+  "/erp/timetable-templates/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "timetable.manage", "academics.manage"),
+  asyncHandler(deleteTimetableTemplateController),
+);
+
+campusRouter.get(
   "/erp/setup",
   requireEntitlement("CMS"),
   requirePermission("erp.view"),
@@ -2046,6 +2591,26 @@ campusRouter.post(
   requireEntitlement("CMS"),
   requirePermission("erp.manage"),
   asyncHandler(createPaymentMethodController),
+);
+campusRouter.get(
+  "/erp/payment-methods/setup",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(getPaymentMethodsSetupController),
+);
+campusRouter.post(
+  "/erp/payment-methods/setup",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertPaymentMethodSetupController),
+);
+campusRouter.delete(
+  "/erp/payment-methods/setup/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deletePaymentMethodSetupController),
+);
+campusRouter.post(
+  "/erp/payment-methods/:id/toggle",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(togglePaymentMethodSetupController),
 );
 campusRouter.put(
   "/erp/payment-methods/:id",
@@ -2065,11 +2630,233 @@ campusRouter.put(
   requirePermission("erp.manage"),
   asyncHandler(upsertModuleController),
 );
+campusRouter.get(
+  "/erp/modules-setup",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(getModulesSetupController),
+);
+campusRouter.post(
+  "/erp/modules-setup",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(createModuleSetupController),
+);
+campusRouter.put(
+  "/erp/modules-setup/:key",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertModuleSetupController),
+);
+campusRouter.post(
+  "/erp/modules-setup/:key/toggle",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(toggleModuleSetupController),
+);
+campusRouter.delete(
+  "/erp/modules-setup/:key",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteModuleSetupController),
+);
+campusRouter.get(
+  "/erp/data-import-export",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(getDataImportExportSetupController),
+);
+campusRouter.post(
+  "/erp/data-import-export/import",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(runDataImportController),
+);
+campusRouter.delete(
+  "/erp/data-import-export/history/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteImportJobController),
+);
+campusRouter.get(
+  "/erp/data-import-export/export/:key",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(exportDataController),
+);
+campusRouter.post(
+  "/erp/data-import-export/export",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(runDataExportController),
+);
+campusRouter.get(
+  "/erp/two-factor",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(getTwoFactorSetupController),
+);
+campusRouter.put(
+  "/erp/two-factor",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveTwoFactorSettingsController),
+);
+campusRouter.get(
+  "/erp/holidays-calendar",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(getHolidaysCalendarSetupController),
+);
+campusRouter.post(
+  "/erp/holidays-calendar/holidays",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(createCalendarHolidayController),
+);
+campusRouter.put(
+  "/erp/holidays-calendar/holidays/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(updateCalendarHolidayController),
+);
+campusRouter.delete(
+  "/erp/holidays-calendar/holidays/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteCalendarHolidayController),
+);
+campusRouter.post(
+  "/erp/holidays-calendar/groups",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertHolidayGroupController),
+);
+campusRouter.put(
+  "/erp/holidays-calendar/groups",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertHolidayGroupController),
+);
+campusRouter.delete(
+  "/erp/holidays-calendar/groups/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteHolidayGroupController),
+);
+campusRouter.put(
+  "/erp/holidays-calendar/settings",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveHolidaySettingsController),
+);
+campusRouter.get(
+  "/erp/holidays-calendar/export",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(exportHolidaysCalendarController),
+);
+campusRouter.get(
+  "/erp/session-login-policy",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view"),
+  asyncHandler(getSessionLoginPolicySetupController),
+);
+campusRouter.put(
+  "/erp/session-login-policy",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveSessionLoginPolicyController),
+);
+campusRouter.delete(
+  "/erp/session-login-policy/sessions/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(terminateLoginSessionController),
+);
+campusRouter.post(
+  "/erp/session-login-policy/sessions/terminate-others",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(terminateOtherLoginSessionsController),
+);
+campusRouter.get(
+  "/erp/transport-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view", "transport.view"),
+  asyncHandler(getTransportSettingsSetupController),
+);
+campusRouter.put(
+  "/erp/transport-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "transport.manage"),
+  asyncHandler(saveTransportSettingsController),
+);
+campusRouter.post(
+  "/erp/transport-settings/routes",
+  requireAnyPermission("erp.manage", "settings.manage", "transport.manage"),
+  asyncHandler(upsertTransportSettingsRouteController),
+);
+campusRouter.put(
+  "/erp/transport-settings/routes",
+  requireAnyPermission("erp.manage", "settings.manage", "transport.manage"),
+  asyncHandler(upsertTransportSettingsRouteController),
+);
+campusRouter.delete(
+  "/erp/transport-settings/routes/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "transport.manage"),
+  asyncHandler(deleteTransportSettingsRouteController),
+);
+campusRouter.post(
+  "/erp/transport-settings/vehicles",
+  requireAnyPermission("erp.manage", "settings.manage", "transport.manage"),
+  asyncHandler(upsertTransportVehicleController),
+);
+campusRouter.put(
+  "/erp/transport-settings/vehicles",
+  requireAnyPermission("erp.manage", "settings.manage", "transport.manage"),
+  asyncHandler(upsertTransportVehicleController),
+);
+campusRouter.delete(
+  "/erp/transport-settings/vehicles/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "transport.manage"),
+  asyncHandler(deleteTransportVehicleController),
+);
+campusRouter.get(
+  "/erp/library-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view", "library.view"),
+  asyncHandler(getLibrarySettingsSetupController),
+);
+campusRouter.put(
+  "/erp/library-settings",
+  requireAnyPermission("erp.manage", "settings.manage", "library.manage"),
+  asyncHandler(saveLibrarySettingsController),
+);
+campusRouter.post(
+  "/erp/library-settings/member-types",
+  requireAnyPermission("erp.manage", "settings.manage", "library.manage"),
+  asyncHandler(upsertLibraryMemberTypeController),
+);
+campusRouter.put(
+  "/erp/library-settings/member-types",
+  requireAnyPermission("erp.manage", "settings.manage", "library.manage"),
+  asyncHandler(upsertLibraryMemberTypeController),
+);
+campusRouter.delete(
+  "/erp/library-settings/member-types/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "library.manage"),
+  asyncHandler(deleteLibraryMemberTypeController),
+);
+campusRouter.post(
+  "/erp/library-settings/categories",
+  requireAnyPermission("erp.manage", "settings.manage", "library.manage"),
+  asyncHandler(upsertLibrarySettingsCategoryController),
+);
+campusRouter.put(
+  "/erp/library-settings/categories",
+  requireAnyPermission("erp.manage", "settings.manage", "library.manage"),
+  asyncHandler(upsertLibrarySettingsCategoryController),
+);
+campusRouter.delete(
+  "/erp/library-settings/categories/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "library.manage"),
+  asyncHandler(deleteLibrarySettingsCategoryController),
+);
+campusRouter.get(
+  "/erp/library-settings/barcode-preview",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.view", "settings.view", "library.view"),
+  asyncHandler(previewLibraryBarcodeController),
+);
+campusRouter.get(
+  "/erp/languages",
+  requireEntitlement("CMS"),
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(listLanguagesController),
+);
 campusRouter.put(
   "/erp/languages",
   requireEntitlement("CMS"),
-  requirePermission("erp.manage"),
+  requireAnyPermission("erp.manage", "settings.manage"),
   asyncHandler(upsertLanguageController),
+);
+campusRouter.put(
+  "/erp/languages/sync",
+  requireEntitlement("CMS"),
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(syncLanguagesController),
 );
 campusRouter.post(
   "/erp/custom-fields",
@@ -2089,11 +2876,271 @@ campusRouter.delete(
   requirePermission("erp.manage"),
   asyncHandler(deleteCustomFieldController),
 );
+campusRouter.get(
+  "/erp/system-fields",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getSystemFieldsSetupController),
+);
 campusRouter.put(
   "/erp/system-fields/:key",
   requireEntitlement("CMS"),
   requirePermission("erp.manage"),
   asyncHandler(upsertSystemFieldController),
+);
+campusRouter.get(
+  "/erp/shortcut-keys",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getShortcutKeysSetupController),
+);
+campusRouter.put(
+  "/erp/shortcut-keys",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveShortcutKeysController),
+);
+campusRouter.post(
+  "/erp/shortcut-keys/reset",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(resetShortcutKeysController),
+);
+campusRouter.get(
+  "/erp/theme-branding",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getThemeBrandingSetupController),
+);
+campusRouter.put(
+  "/erp/theme-branding",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveThemeBrandingController),
+);
+campusRouter.get(
+  "/erp/website-cms",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getWebsiteCmsSetupController),
+);
+campusRouter.post(
+  "/erp/website-cms/pages",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(createWebsitePageController),
+);
+campusRouter.put(
+  "/erp/website-cms/pages/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(updateWebsitePageController),
+);
+campusRouter.delete(
+  "/erp/website-cms/pages/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteWebsitePageController),
+);
+campusRouter.post(
+  "/erp/website-cms/menus",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertWebsiteMenuController),
+);
+campusRouter.delete(
+  "/erp/website-cms/menus/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteWebsiteMenuController),
+);
+campusRouter.post(
+  "/erp/website-cms/menu-items",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertWebsiteMenuItemController),
+);
+campusRouter.delete(
+  "/erp/website-cms/menu-items/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteWebsiteMenuItemController),
+);
+campusRouter.post(
+  "/erp/website-cms/media",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(createWebsiteMediaController),
+);
+campusRouter.delete(
+  "/erp/website-cms/media/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteWebsiteMediaController),
+);
+campusRouter.post(
+  "/erp/website-cms/banners",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertWebsiteBannerController),
+);
+campusRouter.delete(
+  "/erp/website-cms/banners/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteWebsiteBannerController),
+);
+campusRouter.put(
+  "/erp/website-cms/site-settings",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveWebsiteSiteSettingsController),
+);
+campusRouter.get(
+  "/erp/sms-gateway",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getSmsGatewaySetupController),
+);
+campusRouter.put(
+  "/erp/sms-gateway",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveSmsGatewayController),
+);
+campusRouter.post(
+  "/erp/sms-gateway/test",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(testSmsGatewayController),
+);
+campusRouter.post(
+  "/erp/sms-gateway/templates",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertSmsTemplateController),
+);
+campusRouter.post(
+  "/erp/sms-gateway/templates/:id/clone",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(cloneSmsTemplateController),
+);
+campusRouter.delete(
+  "/erp/sms-gateway/templates/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteSmsTemplateController),
+);
+campusRouter.get(
+  "/erp/email-gateway",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getEmailGatewaySetupController),
+);
+campusRouter.post(
+  "/erp/email-gateway",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertEmailGatewayController),
+);
+campusRouter.post(
+  "/erp/email-gateway/test",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(testEmailGatewayController),
+);
+campusRouter.post(
+  "/erp/email-gateway/templates",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertEmailTemplateController),
+);
+campusRouter.delete(
+  "/erp/email-gateway/templates/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteEmailTemplateController),
+);
+campusRouter.post(
+  "/erp/email-gateway/:id/clone",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(cloneEmailGatewayController),
+);
+campusRouter.delete(
+  "/erp/email-gateway/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteEmailGatewayController),
+);
+campusRouter.get(
+  "/erp/whatsapp-gateway",
+  requireAnyPermission("erp.view", "settings.view"),
+  asyncHandler(getWhatsAppGatewaySetupController),
+);
+campusRouter.put(
+  "/erp/whatsapp-gateway",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(saveWhatsAppGatewayController),
+);
+campusRouter.post(
+  "/erp/whatsapp-gateway/test",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(testWhatsAppConnectionController),
+);
+campusRouter.post(
+  "/erp/whatsapp-gateway/test-message",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(sendWhatsAppTestMessageController),
+);
+campusRouter.post(
+  "/erp/whatsapp-gateway/templates",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertWhatsAppTemplateController),
+);
+campusRouter.delete(
+  "/erp/whatsapp-gateway/templates/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteWhatsAppTemplateController),
+);
+campusRouter.get(
+  "/erp/push-gateway",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(getPushGatewaySetupController),
+);
+campusRouter.put(
+  "/erp/push-gateway",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(savePushGatewayController),
+);
+campusRouter.post(
+  "/erp/push-gateway/test",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(testPushGatewayController),
+);
+campusRouter.post(
+  "/erp/push-gateway/topics",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertPushTopicController),
+);
+campusRouter.delete(
+  "/erp/push-gateway/topics/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deletePushTopicController),
+);
+campusRouter.get(
+  "/erp/notification-triggers",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(getNotificationTriggersSetupController),
+);
+campusRouter.post(
+  "/erp/notification-triggers",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertNotificationTriggerController),
+);
+campusRouter.post(
+  "/erp/notification-triggers/:id/toggle",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(toggleNotificationTriggerController),
+);
+campusRouter.post(
+  "/erp/notification-triggers/:id/test",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(testNotificationTriggerController),
+);
+campusRouter.delete(
+  "/erp/notification-triggers/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteNotificationTriggerController),
+);
+campusRouter.get(
+  "/erp/message-notice-templates",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(getMessageNoticeTemplatesSetupController),
+);
+campusRouter.post(
+  "/erp/message-notice-templates",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(upsertMessageNoticeTemplateController),
+);
+campusRouter.post(
+  "/erp/message-notice-templates/:id/toggle",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(toggleMessageNoticeTemplateController),
+);
+campusRouter.delete(
+  "/erp/message-notice-templates/:id",
+  requireAnyPermission("erp.manage", "settings.manage"),
+  asyncHandler(deleteMessageNoticeTemplateController),
 );
 campusRouter.put(
   "/erp/shortcuts/:key",
@@ -2118,6 +3165,36 @@ campusRouter.delete(
   requireEntitlement("CMS"),
   requirePermission("erp.manage"),
   asyncHandler(deleteHolidayController),
+);
+campusRouter.get(
+  "/erp/student-docs-folders",
+  requireAnyPermission("erp.view", "settings.view", "documents.view", "students.view"),
+  asyncHandler(getStudentDocsFoldersSetupController),
+);
+campusRouter.post(
+  "/erp/student-docs-folders",
+  requireAnyPermission("erp.manage", "settings.manage", "documents.manage", "students.manage"),
+  asyncHandler(createStudentDocsFolderController),
+);
+campusRouter.put(
+  "/erp/student-docs-folders/reorder",
+  requireAnyPermission("erp.manage", "settings.manage", "documents.manage", "students.manage"),
+  asyncHandler(reorderStudentDocsFoldersController),
+);
+campusRouter.put(
+  "/erp/student-docs-folders/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "documents.manage", "students.manage"),
+  asyncHandler(updateStudentDocsFolderController),
+);
+campusRouter.delete(
+  "/erp/student-docs-folders/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "documents.manage", "students.manage"),
+  asyncHandler(deleteStudentDocsFolderController),
+);
+campusRouter.post(
+  "/erp/student-docs-folders/:id/restore",
+  requireAnyPermission("erp.manage", "settings.manage", "documents.manage", "students.manage"),
+  asyncHandler(restoreStudentDocsFolderController),
 );
 campusRouter.post(
   "/erp/document-folders",
@@ -2148,6 +3225,41 @@ campusRouter.post(
   requireEntitlement("CMS"),
   requirePermission("erp.backup"),
   asyncHandler(restoreConfigurationBackupController),
+);
+campusRouter.get(
+  "/erp/backup-restore",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.backup", "erp.view"),
+  asyncHandler(getBackupRestoreSetupController),
+);
+campusRouter.post(
+  "/erp/backup-restore/backups",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.backup"),
+  asyncHandler(createSystemBackupController),
+);
+campusRouter.delete(
+  "/erp/backup-restore/backups/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.backup"),
+  asyncHandler(deleteSystemBackupController),
+);
+campusRouter.post(
+  "/erp/backup-restore/backups/:id/restore",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.backup"),
+  asyncHandler(restoreSystemBackupController),
+);
+campusRouter.put(
+  "/erp/backup-restore/settings",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.backup"),
+  asyncHandler(saveBackupSettingsController),
+);
+campusRouter.post(
+  "/erp/backup-restore/schedules",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.backup"),
+  asyncHandler(upsertBackupScheduleController),
+);
+campusRouter.delete(
+  "/erp/backup-restore/schedules/:id",
+  requireAnyPermission("erp.manage", "settings.manage", "erp.backup"),
+  asyncHandler(deleteBackupScheduleController),
 );
 
 export { campusRouter };

@@ -3,6 +3,7 @@ import {
   EnrollmentStatus,
   FeeAssignmentStatus,
   FeeFineType,
+  FeeHeadKind,
   FeeInvoiceStatus,
   PaymentStatus,
   Prisma,
@@ -180,78 +181,80 @@ export async function getFeeSetup(tenantId: string) {
     where: tenantScope(tenantId, { isCurrent: true }),
   });
   await ensureDefaultReceiptBook(tenantId);
-  const [types, groups, discounts, receiptBooks, classSections, masters, setting] =
-    await Promise.all([
-      prisma.feeType.findMany({
-        where: tenantScope(tenantId, {}),
-        include: { _count: { select: { feeMasters: true, groupItems: true } } },
-        orderBy: { name: "asc" },
-      }),
-      prisma.feeGroup.findMany({
-        where: tenantScope(tenantId, {}),
-        include: {
-          items: { include: { feeType: true } },
-          _count: { select: { feeMasters: true } },
-        },
-        orderBy: { name: "asc" },
-      }),
-      prisma.feeDiscount.findMany({
-        where: tenantScope(tenantId, {}),
-        include: { _count: { select: { assignments: true } } },
-        orderBy: { name: "asc" },
-      }),
-      prisma.feeReceiptBook.findMany({
-        where: tenantScope(tenantId, {}),
-        orderBy: [{ isDefault: "desc" }, { name: "asc" }],
-      }),
-      currentSession
-        ? prisma.classSection.findMany({
-            where: tenantScope(tenantId, { academicSessionId: currentSession.id }),
-            include: {
-              academicClass: true,
-              section: true,
-              enrollments: {
-                where: { status: "ACTIVE" },
-                include: {
-                  student: {
-                    select: {
-                      id: true,
-                      admissionNumber: true,
-                      firstName: true,
-                      lastName: true,
-                      rteEnabled: true,
-                      siblingGroupId: true,
-                      photoUrl: true,
-                    },
+  const [types, groups, discounts, receiptBooks, classSections, setting] = await Promise.all([
+    prisma.feeType.findMany({
+      where: tenantScope(tenantId, {}),
+      include: { _count: { select: { feeMasters: true, groupItems: true } } },
+      orderBy: { name: "asc" },
+    }),
+    prisma.feeGroup.findMany({
+      where: tenantScope(tenantId, {}),
+      include: {
+        items: { include: { feeType: true } },
+        _count: { select: { feeMasters: true } },
+      },
+      orderBy: { name: "asc" },
+    }),
+    prisma.feeDiscount.findMany({
+      where: tenantScope(tenantId, {}),
+      include: { _count: { select: { assignments: true } } },
+      orderBy: { name: "asc" },
+    }),
+    prisma.feeReceiptBook.findMany({
+      where: tenantScope(tenantId, {}),
+      orderBy: [{ isDefault: "desc" }, { name: "asc" }],
+    }),
+    currentSession
+      ? prisma.classSection.findMany({
+          where: tenantScope(tenantId, { academicSessionId: currentSession.id }),
+          include: {
+            academicClass: true,
+            section: true,
+            enrollments: {
+              where: { status: "ACTIVE" },
+              include: {
+                student: {
+                  select: {
+                    id: true,
+                    admissionNumber: true,
+                    firstName: true,
+                    lastName: true,
+                    rteEnabled: true,
+                    siblingGroupId: true,
+                    photoUrl: true,
                   },
                 },
               },
             },
-            orderBy: [
-              { academicClass: { sortOrder: "asc" } },
-              { section: { name: "asc" } },
-            ],
-          })
-        : Promise.resolve([]),
-      currentSession
-        ? prisma.feeMaster.findMany({
-            where: tenantScope(tenantId, { academicSessionId: currentSession.id }),
-            include: {
-              feeType: true,
-              feeGroup: true,
-              classSection: { include: { academicClass: true, section: true } },
-              fineRanges: { orderBy: { startDate: "asc" } },
-              _count: { select: { assignments: true } },
-            },
-            orderBy: [{ sortOrder: "asc" }, { dueDate: "asc" }],
-          })
-        : Promise.resolve([]),
-      prisma.tenantFeeSetting.upsert({
-        where: { tenantId },
-        create: { tenantId },
-        update: {},
-      }),
-    ]);
+          },
+          orderBy: [
+            { academicClass: { sortOrder: "asc" } },
+            { section: { name: "asc" } },
+          ],
+        })
+      : Promise.resolve([]),
+    prisma.tenantFeeSetting.upsert({
+      where: { tenantId },
+      create: { tenantId },
+      update: {},
+    }),
+  ]);
+
+  const masters = currentSession
+    ? await prisma.feeMaster.findMany({
+        where: tenantScope(tenantId, { academicSessionId: currentSession.id }),
+        include: {
+          feeType: true,
+          feeGroup: true,
+          classSection: { include: { academicClass: true, section: true } },
+          fineRanges: { orderBy: { startDate: "asc" } },
+          _count: { select: { assignments: true } },
+        },
+        orderBy: setting.dueDateWiseFeeOrdering
+          ? [{ dueDate: "asc" }, { sortOrder: "asc" }]
+          : [{ sortOrder: "asc" }, { dueDate: "asc" }],
+      })
+    : [];
   const groupIds = groups.map((group) => group.id);
   // FeePaymentItem has no tenantId / feeMaster — scope via payment + assignment.
   const collectedItems =
@@ -289,6 +292,7 @@ export async function getFeeSetup(tenantId: string) {
         tenantId: group.tenantId,
         name: group.name,
         description: group.description,
+        isActive: group.isActive,
         createdAt: group.createdAt,
         updatedAt: group.updatedAt,
         items: group.items,
@@ -307,31 +311,138 @@ export async function getFeeSetup(tenantId: string) {
   };
 }
 
+const feeSettingsSelect = {
+  allowDuplicateInvoice: true,
+  allowCustomFeeReceipt: true,
+  dueDateWiseFeeOrdering: true,
+  feesDueDays: true,
+  updatedAt: true,
+} as const;
+
+export function getFeeSettings(tenantId: string) {
+  return prisma.tenantFeeSetting.upsert({
+    where: { tenantId },
+    create: { tenantId },
+    update: {},
+    select: feeSettingsSelect,
+  });
+}
+
+export type UpdateFeeSettingsInput = {
+  allowDuplicateInvoice?: boolean;
+  allowCustomFeeReceipt?: boolean;
+  dueDateWiseFeeOrdering?: boolean;
+  feesDueDays?: number;
+};
+
+export function updateFeeSettings(tenantId: string, input: UpdateFeeSettingsInput) {
+  return prisma.tenantFeeSetting.upsert({
+    where: { tenantId },
+    create: {
+      tenantId,
+      allowDuplicateInvoice: input.allowDuplicateInvoice ?? true,
+      allowCustomFeeReceipt: input.allowCustomFeeReceipt ?? true,
+      dueDateWiseFeeOrdering: input.dueDateWiseFeeOrdering ?? true,
+      feesDueDays: input.feesDueDays ?? 30,
+    },
+    update: {
+      ...(input.allowDuplicateInvoice !== undefined
+        ? { allowDuplicateInvoice: input.allowDuplicateInvoice }
+        : {}),
+      ...(input.allowCustomFeeReceipt !== undefined
+        ? { allowCustomFeeReceipt: input.allowCustomFeeReceipt }
+        : {}),
+      ...(input.dueDateWiseFeeOrdering !== undefined
+        ? { dueDateWiseFeeOrdering: input.dueDateWiseFeeOrdering }
+        : {}),
+      ...(input.feesDueDays !== undefined ? { feesDueDays: input.feesDueDays } : {}),
+    },
+    select: feeSettingsSelect,
+  });
+}
+
+async function assertExclusiveFeeTypes(
+  tenantId: string,
+  feeTypeIds: string[],
+  excludeGroupId?: string,
+) {
+  const unique = [...new Set(feeTypeIds)];
+  if (!unique.length) return unique;
+  const count = await prisma.feeType.count({
+    where: tenantScope(tenantId, { id: { in: unique } }),
+  });
+  if (count !== unique.length) {
+    throw new AppError(400, "One or more fee heads are invalid", "INVALID_FEE_TYPE");
+  }
+  const taken = await prisma.feeGroupItem.findMany({
+    where: {
+      feeTypeId: { in: unique },
+      ...(excludeGroupId ? { feeGroupId: { not: excludeGroupId } } : {}),
+      feeGroup: { tenantId },
+    },
+    include: {
+      feeType: { select: { name: true } },
+      feeGroup: { select: { name: true } },
+    },
+  });
+  if (taken.length) {
+    const sample = taken[0];
+    throw new AppError(
+      409,
+      `"${sample.feeType.name}" is already in group "${sample.feeGroup.name}"`,
+      "FEE_HEAD_IN_OTHER_GROUP",
+    );
+  }
+  return unique;
+}
+
 export function createFeeType(
   tenantId: string,
-  input: { name: string; code?: string | null; description?: string | null },
+  input: {
+    name: string;
+    code?: string | null;
+    description?: string | null;
+    kind?: FeeHeadKind;
+    applicableTo?: string;
+    gstApplicable?: boolean;
+    defaultAmount?: number;
+    isActive?: boolean;
+  },
 ) {
-  return prisma.feeType.create({ data: { tenantId, ...input } });
+  return prisma.feeType.create({
+    data: {
+      tenantId,
+      name: input.name,
+      code: input.code,
+      description: input.description,
+      kind: input.kind ?? FeeHeadKind.MANDATORY,
+      applicableTo: input.applicableTo?.trim() || "All Classes",
+      gstApplicable: input.gstApplicable ?? false,
+      defaultAmount: input.defaultAmount ?? 0,
+      isActive: input.isActive ?? true,
+    },
+  });
 }
 
 export async function createFeeGroup(
   tenantId: string,
-  input: { name: string; description?: string | null; feeTypeIds: string[] },
+  input: {
+    name: string;
+    description?: string | null;
+    feeTypeIds?: string[];
+    isActive?: boolean;
+  },
 ) {
-  const count = await prisma.feeType.count({
-    where: tenantScope(tenantId, { id: { in: input.feeTypeIds } }),
-  });
-  if (count !== new Set(input.feeTypeIds).size) {
-    throw new AppError(400, "One or more fee types are invalid", "INVALID_FEE_TYPE");
-  }
+  const feeTypeIds = await assertExclusiveFeeTypes(tenantId, input.feeTypeIds ?? []);
   return prisma.feeGroup.create({
     data: {
       tenantId,
       name: input.name,
       description: input.description,
-      items: {
-        create: [...new Set(input.feeTypeIds)].map((feeTypeId) => ({ feeTypeId })),
-      },
+      isActive: input.isActive ?? true,
+      items: feeTypeIds.length
+        ? { create: feeTypeIds.map((feeTypeId) => ({ feeTypeId })) }
+        : undefined,
     },
     include: { items: { include: { feeType: true } } },
   });
@@ -487,11 +598,17 @@ export async function createCustomFee(
     }
   }
 
+  const feeSetting = await prisma.tenantFeeSetting.upsert({
+    where: { tenantId },
+    create: { tenantId },
+    update: {},
+    select: { feesDueDays: true },
+  });
   const dueDate =
     input.dueDate ??
     (() => {
       const d = new Date();
-      d.setUTCDate(d.getUTCDate() + 30);
+      d.setUTCDate(d.getUTCDate() + Math.max(1, feeSetting.feesDueDays || 30));
       return d;
     })();
 
@@ -618,6 +735,10 @@ export async function updateFeeType(
     name?: string;
     code?: string | null;
     description?: string | null;
+    kind?: FeeHeadKind;
+    applicableTo?: string;
+    gstApplicable?: boolean;
+    defaultAmount?: number;
     isActive?: boolean;
   },
 ) {
@@ -628,6 +749,10 @@ export async function updateFeeType(
       name: input.name,
       code: input.code === undefined ? undefined : input.code,
       description: input.description === undefined ? undefined : input.description,
+      kind: input.kind,
+      applicableTo: input.applicableTo === undefined ? undefined : input.applicableTo.trim() || "All Classes",
+      gstApplicable: input.gstApplicable,
+      defaultAmount: input.defaultAmount,
       isActive: input.isActive,
     },
   });
@@ -655,30 +780,33 @@ export async function deleteFeeType(tenantId: string, id: string) {
 export async function updateFeeGroup(
   tenantId: string,
   id: string,
-  input: { name?: string; description?: string | null; feeTypeIds?: string[] },
+  input: {
+    name?: string;
+    description?: string | null;
+    feeTypeIds?: string[];
+    isActive?: boolean;
+  },
 ) {
   await requireFeeGroup(tenantId, id);
-  if (input.feeTypeIds) {
-    const count = await prisma.feeType.count({
-      where: tenantScope(tenantId, { id: { in: input.feeTypeIds } }),
-    });
-    if (count !== new Set(input.feeTypeIds).size) {
-      throw new AppError(400, "One or more fee types are invalid", "INVALID_FEE_TYPE");
-    }
-  }
+  const feeTypeIds = input.feeTypeIds
+    ? await assertExclusiveFeeTypes(tenantId, input.feeTypeIds, id)
+    : undefined;
 
   return prisma.$transaction(async (tx) => {
-    if (input.feeTypeIds) {
+    if (feeTypeIds) {
       await tx.feeGroupItem.deleteMany({ where: { feeGroupId: id } });
-      await tx.feeGroupItem.createMany({
-        data: [...new Set(input.feeTypeIds)].map((feeTypeId) => ({ feeGroupId: id, feeTypeId })),
-      });
+      if (feeTypeIds.length) {
+        await tx.feeGroupItem.createMany({
+          data: feeTypeIds.map((feeTypeId) => ({ feeGroupId: id, feeTypeId })),
+        });
+      }
     }
     return tx.feeGroup.update({
       where: { id },
       data: {
         name: input.name,
         description: input.description === undefined ? undefined : input.description,
+        isActive: input.isActive,
       },
       include: { items: { include: { feeType: true } } },
     });

@@ -87,6 +87,21 @@ export async function sendPushToUser(
     }
   }
 
+  try {
+    const { logPushDelivery } = await import("../erp/push-gateway.service.js");
+    await logPushDelivery({
+      tenantId,
+      title: payload.title,
+      body: payload.body,
+      topicKey: payload.type ?? null,
+      recipientCount: subscriptions.length,
+      status: failed === 0 ? "DELIVERED" : delivered === 0 ? "FAILED" : "SENT",
+      errorMessage: failed > 0 ? `${failed} subscription(s) failed` : null,
+    });
+  } catch {
+    // Non-blocking analytics logging
+  }
+
   return { delivered, failed };
 }
 

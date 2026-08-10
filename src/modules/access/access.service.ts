@@ -11,7 +11,33 @@ interface RoleInput {
   code: string;
   description?: string | null;
   permissionIds: string[];
+  isActive?: boolean;
 }
+
+/** Modules shown in the ERP Staff Roles permission matrix. */
+export const ROLE_PERMISSION_MODULES = [
+  { key: "dashboard", label: "Dashboard", view: "reports.view", manage: null, extras: [] as string[] },
+  { key: "students", label: "Student Management", view: "students.view", manage: "students.manage", extras: [] },
+  { key: "fees", label: "Fees", view: "fees.view", manage: "fees.manage", extras: ["fees.collect"] },
+  { key: "academics", label: "Academics", view: "academics.view", manage: "academics.manage", extras: [] },
+  { key: "attendance", label: "Attendance", view: "attendance.view", manage: "attendance.manage", extras: [] },
+  { key: "exams", label: "Exams", view: "exams.view", manage: "exams.manage", extras: ["exams.publish"] },
+  { key: "timetable", label: "Timetable", view: "timetable.view", manage: "timetable.manage", extras: [] },
+  { key: "homework", label: "Homework", view: "homework.view", manage: "homework.manage", extras: ["homework.submit", "homework.evaluate"] },
+  { key: "hr", label: "HR & Payroll", view: "hr.view", manage: "hr.manage", extras: ["payroll.manage"] },
+  { key: "documents", label: "Documents", view: "documents.view", manage: "documents.manage", extras: ["documents.generate"] },
+  { key: "transport", label: "Transport", view: "transport.view", manage: "transport.manage", extras: [] },
+  { key: "hostel", label: "Hostel", view: "hostel.view", manage: "hostel.manage", extras: [] },
+  { key: "library", label: "Library", view: "library.view", manage: "library.manage", extras: [] },
+  { key: "inventory", label: "Inventory", view: "inventory.view", manage: "inventory.manage", extras: [] },
+  { key: "online_exam", label: "Online Exam", view: "online_exam.view", manage: "online_exam.manage", extras: [] },
+  { key: "erp", label: "ERP Settings", view: "erp.view", manage: "erp.manage", extras: ["erp.backup"] },
+  { key: "settings", label: "Settings", view: "settings.view", manage: "settings.manage", extras: [] },
+  { key: "users", label: "Users", view: "users.view", manage: "users.manage", extras: [] },
+  { key: "roles", label: "Roles", view: "roles.view", manage: "roles.manage", extras: [] },
+  { key: "notifications", label: "Notifications", view: null, manage: "notifications.manage", extras: [] },
+  { key: "reports", label: "Reports", view: "reports.view", manage: null, extras: [] },
+] as const;
 
 interface UserInput {
   email: string;
@@ -83,6 +109,7 @@ export async function createRole(tenantId: string, input: RoleInput) {
       code: input.code,
       name: input.name,
       description: input.description,
+      isActive: input.isActive ?? true,
       permissions: {
         create: [...new Set(input.permissionIds)].map((permissionId) => ({ permissionId })),
       },
@@ -94,28 +121,190 @@ export async function createRole(tenantId: string, input: RoleInput) {
 export async function updateRole(
   tenantId: string,
   roleId: string,
-  input: Omit<RoleInput, "code">,
+  input: Partial<Omit<RoleInput, "code">> & { permissionIds?: string[] },
 ) {
-  await assertPermissions(input.permissionIds);
+  if (input.permissionIds) await assertPermissions(input.permissionIds);
   const role = await prisma.role.findFirst({
     where: tenantScope(tenantId, { id: roleId }),
   });
   if (!role) throw new AppError(404, "Role not found", "ROLE_NOT_FOUND");
 
   return prisma.$transaction(async (tx) => {
-    await tx.rolePermission.deleteMany({ where: { roleId } });
+    if (input.permissionIds) {
+      await tx.rolePermission.deleteMany({ where: { roleId } });
+    }
     return tx.role.update({
       where: { id: roleId },
       data: {
         name: input.name,
-        description: input.description,
-        permissions: {
-          create: [...new Set(input.permissionIds)].map((permissionId) => ({ permissionId })),
-        },
+        description: input.description === undefined ? undefined : input.description,
+        isActive: input.isActive,
+        permissions: input.permissionIds
+          ? {
+              create: [...new Set(input.permissionIds)].map((permissionId) => ({
+                permissionId,
+              })),
+            }
+          : undefined,
       },
       include: roleInclude,
     });
   });
+}
+
+export async function getStaffRolesSetup(tenantId: string) {
+  await ensureTenantRoles(tenantId);
+  const [roles, permissions, staffUsers, totalStaff] = await Promise.all([
+    prisma.role.findMany({
+      where: tenantScope(tenantId, {}),
+      include: {
+        permissions: { include: { permission: true } },
+        _count: { select: { users: true } },
+        users: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                status: true,
+                staffProfile: {
+                  select: {
+                    employeeNumber: true,
+                    status: true,
+                    department: { select: { id: true, name: true } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+    }),
+    prisma.permission.findMany({
+      where: { key: { not: { startsWith: "platform." } } },
+      orderBy: { key: "asc" },
+    }),
+    prisma.user.findMany({
+      where: tenantScope(tenantId, {
+        OR: [{ staffProfile: { isNot: null } }, { roles: { some: {} } }],
+        studentProfile: null,
+      }),
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        status: true,
+        staffProfile: {
+          select: {
+            employeeNumber: true,
+            status: true,
+            department: { select: { id: true, name: true } },
+          },
+        },
+        roles: { select: { roleId: true } },
+      },
+      orderBy: [{ firstName: "asc" }, { lastName: "asc" }],
+    }),
+    prisma.staffProfile.count({ where: { tenantId } }),
+  ]);
+
+  const mappedRoles = roles.map((role) => ({
+    id: role.id,
+    code: role.code,
+    name: role.name,
+    description: role.description,
+    isSystem: role.isSystem,
+    isActive: role.isActive,
+    staffCount: role._count.users,
+    permissionIds: role.permissions.map((row) => row.permissionId),
+    permissionKeys: role.permissions.map((row) => row.permission.key),
+    staff: role.users.map((row) => ({
+      id: row.user.id,
+      name: `${row.user.firstName} ${row.user.lastName}`.trim(),
+      email: row.user.email,
+      employeeNumber: row.user.staffProfile?.employeeNumber ?? null,
+      department: row.user.staffProfile?.department?.name ?? null,
+      status: row.user.staffProfile?.status ?? row.user.status,
+    })),
+  }));
+
+  return {
+    stats: {
+      totalRoles: mappedRoles.length,
+      totalStaff,
+      customRoles: mappedRoles.filter((role) => !role.isSystem).length,
+      systemRoles: mappedRoles.filter((role) => role.isSystem).length,
+    },
+    roles: mappedRoles,
+    permissions,
+    modules: ROLE_PERMISSION_MODULES,
+    assignableStaff: staffUsers.map((user) => ({
+      id: user.id,
+      name: `${user.firstName} ${user.lastName}`.trim(),
+      email: user.email,
+      employeeNumber: user.staffProfile?.employeeNumber ?? null,
+      department: user.staffProfile?.department?.name ?? null,
+      status: user.staffProfile?.status ?? user.status,
+      roleIds: user.roles.map((row) => row.roleId),
+    })),
+  };
+}
+
+export async function assignStaffToRole(
+  tenantId: string,
+  roleId: string,
+  userIds: string[],
+) {
+  const role = await prisma.role.findFirst({
+    where: tenantScope(tenantId, { id: roleId }),
+    select: { id: true },
+  });
+  if (!role) throw new AppError(404, "Role not found", "ROLE_NOT_FOUND");
+
+  const unique = [...new Set(userIds)];
+  if (unique.length) {
+    const count = await prisma.user.count({
+      where: tenantScope(tenantId, { id: { in: unique } }),
+    });
+    if (count !== unique.length) {
+      throw new AppError(400, "One or more staff users are invalid", "INVALID_USER");
+    }
+  }
+
+  await prisma.$transaction(
+    unique.map((userId) =>
+      prisma.userRole.upsert({
+        where: { userId_roleId: { userId, roleId } },
+        create: { userId, roleId, tenantId },
+        update: { tenantId },
+      }),
+    ),
+  );
+
+  return getStaffRolesSetup(tenantId);
+}
+
+export async function removeStaffFromRole(
+  tenantId: string,
+  roleId: string,
+  userId: string,
+) {
+  const role = await prisma.role.findFirst({
+    where: tenantScope(tenantId, { id: roleId }),
+    select: { id: true },
+  });
+  if (!role) throw new AppError(404, "Role not found", "ROLE_NOT_FOUND");
+
+  const result = await prisma.userRole.deleteMany({
+    where: { tenantId, roleId, userId },
+  });
+  if (!result.count) throw new AppError(404, "Staff assignment not found", "ASSIGNMENT_NOT_FOUND");
+
+  return getStaffRolesSetup(tenantId);
 }
 
 export async function deleteRole(tenantId: string, roleId: string) {

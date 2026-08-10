@@ -27,15 +27,20 @@ import {
   createSubject,
   deleteElectiveCategory,
   deleteScopedRecord,
+  deleteSession,
   getAcademicSetup,
   getElectiveAssignmentBoard,
+  listSessions,
   promoteStudents,
+  reorderClasses,
+  reorderSubjects,
   saveStudentElectives,
   setCurrentSession,
   updateClass,
   updateClassSection,
   updateElectiveCategory,
   updateSection,
+  updateSession,
   updateSubject,
 } from "./academics.service.js";
 import {
@@ -52,6 +57,12 @@ const sessionBody = z.object({
   startDate: z.coerce.date(),
   endDate: z.coerce.date(),
   isCurrent: z.boolean().default(false),
+});
+const sessionUpdateBody = z.object({
+  name: z.string().trim().min(3).max(50).optional(),
+  startDate: z.coerce.date().optional(),
+  endDate: z.coerce.date().optional(),
+  isCurrent: z.boolean().optional(),
 });
 const classBody = z.object({
   name: z.string().trim().min(1).max(100),
@@ -72,22 +83,38 @@ const subjectBody = z.object({
   code: z.string().trim().max(30).nullable().optional(),
   type: z.nativeEnum(SubjectType).default(SubjectType.CORE),
   deliveryType: z.nativeEnum(SubjectDeliveryType).default(SubjectDeliveryType.THEORY),
+  maxMarks: z.coerce.number().int().min(1).max(1000).nullable().optional(),
+  passMarks: z.coerce.number().int().min(0).max(1000).nullable().optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.coerce.number().int().min(0).max(10000).optional(),
+  classIds: z.array(z.string().min(1)).max(200).optional(),
   electiveCategoryId: z
     .preprocess((value) => (value === "" || value === undefined ? null : value), z.string().min(1).nullable())
     .optional(),
 });
+const reorderSubjectsBody = z.object({
+  orderedIds: z.array(z.string().min(1)).min(1).max(500),
+});
 const classSectionBody = z.object({
   academicSessionId: z.string().min(1),
   classId: z.string().min(1),
-  sectionId: z.string().min(1),
+  sectionId: z.string().min(1).optional(),
+  sectionName: z.string().trim().min(1).max(100).optional(),
   classTeacherId: z
     .preprocess((value) => (value === "" || value === undefined ? null : value), z.string().min(1).nullable())
     .optional(),
+  roomNo: z.string().trim().max(40).nullable().optional(),
+  capacity: z.coerce.number().int().min(1).max(5000).nullable().optional(),
 });
 const teacherBody = z.object({
   classTeacherId: z
     .preprocess((value) => (value === "" || value === undefined ? null : value), z.string().min(1).nullable())
     .optional(),
+  roomNo: z.string().trim().max(40).nullable().optional(),
+  capacity: z.coerce.number().int().min(1).max(5000).nullable().optional(),
+});
+const reorderClassesBody = z.object({
+  orderedIds: z.array(z.string().min(1)).min(1).max(500),
 });
 const subjectAssignmentBody = z.object({
   classSectionId: z.string().min(1),
@@ -326,9 +353,24 @@ export async function getAcademicSetupController(req: Request, res: Response) {
   res.json({ data: await getAcademicSetup(req.auth!.tenantId!, sessionId) });
 }
 
+export async function listSessionsController(req: Request, res: Response) {
+  res.json({ data: await listSessions(req.auth!.tenantId!) });
+}
+
 export async function createSessionController(req: Request, res: Response) {
   const data = await createSession(req.auth!.tenantId!, sessionBody.parse(req.body));
   res.status(201).json({ data });
+}
+
+export async function updateSessionController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const body = sessionUpdateBody.parse(req.body);
+  res.json({ data: await updateSession(req.auth!.tenantId!, id, body) });
+}
+
+export async function deleteSessionController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  res.json({ data: await deleteSession(req.auth!.tenantId!, id) });
 }
 
 export async function setCurrentSessionController(req: Request, res: Response) {
@@ -394,6 +436,11 @@ export async function updateSubjectController(req: Request, res: Response) {
   });
 }
 
+export async function reorderSubjectsController(req: Request, res: Response) {
+  const body = reorderSubjectsBody.parse(req.body);
+  res.json({ data: await reorderSubjects(req.auth!.tenantId!, body.orderedIds) });
+}
+
 export async function createClassSectionController(req: Request, res: Response) {
   res.status(201).json({
     data: await createClassSection(req.auth!.tenantId!, classSectionBody.parse(req.body)),
@@ -405,6 +452,11 @@ export async function updateClassSectionController(req: Request, res: Response) 
   res.json({
     data: await updateClassSection(req.auth!.tenantId!, id, teacherBody.parse(req.body)),
   });
+}
+
+export async function reorderClassesController(req: Request, res: Response) {
+  const body = reorderClassesBody.parse(req.body);
+  res.json({ data: await reorderClasses(req.auth!.tenantId!, body.orderedIds) });
 }
 
 export async function assignSubjectController(req: Request, res: Response) {

@@ -38,8 +38,22 @@ export async function getAcademicSetup(tenantId: string, sessionId?: string) {
       }),
       prisma.subject.findMany({
         where: tenantScope(tenantId, {}),
-        include: { electiveCategory: { select: { id: true, name: true, maxSelect: true } } },
-        orderBy: { name: "asc" },
+        include: {
+          electiveCategory: { select: { id: true, name: true, maxSelect: true } },
+          classSubjects: {
+            where: currentSession
+              ? { classSection: { academicSessionId: currentSession.id } }
+              : { id: { in: [] } },
+            select: {
+              classSection: {
+                select: {
+                  academicClass: { select: { id: true, name: true, sortOrder: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
       }),
       prisma.user.findMany({
         where: tenantScope(tenantId, {
@@ -91,18 +105,40 @@ export async function getAcademicSetup(tenantId: string, sessionId?: string) {
       listSubjectGroups(tenantId),
     ]);
 
+  const subjectsWithClasses = subjects.map((subject) => {
+    const classMap = new Map<string, { id: string; name: string; sortOrder: number }>();
+    for (const assignment of subject.classSubjects) {
+      const academicClass = assignment.classSection.academicClass;
+      classMap.set(academicClass.id, academicClass);
+    }
+    const { classSubjects: _classSubjects, ...rest } = subject;
+    return {
+      ...rest,
+      applicableClasses: [...classMap.values()].sort(
+        (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+      ),
+    };
+  });
+
   return {
     currentSession,
     sessions,
     classes,
     sections,
-    subjects,
+    subjects: subjectsWithClasses,
     teachers,
     classSections,
     teacherRoleId: teacherRole?.id ?? null,
     electiveCategories,
     subjectGroups,
   };
+}
+
+export async function listSessions(tenantId: string) {
+  return prisma.academicSession.findMany({
+    where: tenantScope(tenantId, {}),
+    orderBy: { startDate: "desc" },
+  });
 }
 
 export async function createSession(
@@ -121,6 +157,84 @@ export async function createSession(
     }
     return tx.academicSession.create({ data: { tenantId, ...input } });
   });
+}
+
+export async function updateSession(
+  tenantId: string,
+  sessionId: string,
+  input: { name?: string; startDate?: Date; endDate?: Date; isCurrent?: boolean },
+) {
+  const existing = await prisma.academicSession.findFirst({
+    where: tenantScope(tenantId, { id: sessionId }),
+  });
+  if (!existing) throw new AppError(404, "Academic session not found", "SESSION_NOT_FOUND");
+
+  const startDate = input.startDate ?? existing.startDate;
+  const endDate = input.endDate ?? existing.endDate;
+  if (endDate <= startDate) {
+    throw new AppError(400, "Session end date must be after start date", "INVALID_DATES");
+  }
+
+  const name = input.name?.trim();
+  if (name) {
+    const clash = await prisma.academicSession.findFirst({
+      where: tenantScope(tenantId, { name, NOT: { id: sessionId } }),
+      select: { id: true },
+    });
+    if (clash) throw new AppError(409, `Session "${name}" already exists`, "SESSION_EXISTS");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    if (input.isCurrent === true) {
+      await tx.academicSession.updateMany({
+        where: { tenantId, isCurrent: true, NOT: { id: sessionId } },
+        data: { isCurrent: false },
+      });
+    }
+    if (input.isCurrent === false && existing.isCurrent) {
+      throw new AppError(
+        400,
+        "Activate another session before marking this one completed",
+        "CURRENT_SESSION_REQUIRED",
+      );
+    }
+    return tx.academicSession.update({
+      where: { id: sessionId },
+      data: {
+        ...(name ? { name } : {}),
+        ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
+        ...(input.endDate !== undefined ? { endDate: input.endDate } : {}),
+        ...(input.isCurrent !== undefined ? { isCurrent: input.isCurrent } : {}),
+      },
+    });
+  });
+}
+
+export async function deleteSession(tenantId: string, sessionId: string) {
+  const existing = await prisma.academicSession.findFirst({
+    where: tenantScope(tenantId, { id: sessionId }),
+  });
+  if (!existing) throw new AppError(404, "Academic session not found", "SESSION_NOT_FOUND");
+  if (existing.isCurrent) {
+    throw new AppError(400, "Cannot delete the active academic session", "CURRENT_SESSION_DELETE");
+  }
+
+  const [classSections, enrollments, feeMasters, attendance] = await Promise.all([
+    prisma.classSection.count({ where: tenantScope(tenantId, { academicSessionId: sessionId }) }),
+    prisma.studentEnrollment.count({ where: tenantScope(tenantId, { academicSessionId: sessionId }) }),
+    prisma.feeMaster.count({ where: tenantScope(tenantId, { academicSessionId: sessionId }) }),
+    prisma.attendanceRecord.count({ where: tenantScope(tenantId, { academicSessionId: sessionId }) }),
+  ]);
+  if (classSections || enrollments || feeMasters || attendance) {
+    throw new AppError(
+      409,
+      "Session has linked academic or fee data and cannot be deleted",
+      "SESSION_IN_USE",
+    );
+  }
+
+  await prisma.academicSession.delete({ where: { id: sessionId } });
+  return { id: sessionId };
 }
 
 export async function setCurrentSession(tenantId: string, sessionId: string) {
@@ -212,6 +326,113 @@ export async function updateSection(tenantId: string, id: string, input: { name:
   return prisma.section.update({ where: { id }, data: input });
 }
 
+async function syncSubjectClassAssignments(tenantId: string, subjectId: string, classIds: string[]) {
+  const uniqueClassIds = [...new Set(classIds)];
+  if (uniqueClassIds.length) {
+    const count = await prisma.academicClass.count({
+      where: tenantScope(tenantId, { id: { in: uniqueClassIds } }),
+    });
+    if (count !== uniqueClassIds.length) {
+      throw new AppError(400, "One or more classes are invalid", "INVALID_CLASS");
+    }
+  }
+
+  const currentSession = await prisma.academicSession.findFirst({
+    where: tenantScope(tenantId, { isCurrent: true }),
+    select: { id: true },
+  });
+  if (!currentSession) {
+    if (uniqueClassIds.length) {
+      throw new AppError(400, "No active academic session for class assignment", "NO_CURRENT_SESSION");
+    }
+    return;
+  }
+
+  const targetSections = uniqueClassIds.length
+    ? await prisma.classSection.findMany({
+        where: tenantScope(tenantId, {
+          academicSessionId: currentSession.id,
+          classId: { in: uniqueClassIds },
+        }),
+        select: { id: true },
+      })
+    : [];
+  const targetSectionIds = new Set(targetSections.map((item) => item.id));
+
+  const existing = await prisma.classSubject.findMany({
+    where: tenantScope(tenantId, {
+      subjectId,
+      classSection: { academicSessionId: currentSession.id },
+    }),
+    select: { id: true, classSectionId: true },
+  });
+
+  const toCreate = targetSections.filter(
+    (section) => !existing.some((item) => item.classSectionId === section.id),
+  );
+  const removalCandidates = existing.filter((item) => !targetSectionIds.has(item.classSectionId));
+
+  const removableIds: string[] = [];
+  for (const item of removalCandidates) {
+    const [timetable, groupItems] = await Promise.all([
+      prisma.timetableEntry.count({ where: tenantScope(tenantId, { classSubjectId: item.id }) }),
+      prisma.subjectGroupItem.count({ where: { classSubjectId: item.id } }),
+    ]);
+    if (!timetable && !groupItems) removableIds.push(item.id);
+  }
+
+  if (toCreate.length || removableIds.length) {
+    await prisma.$transaction([
+      ...toCreate.map((section) =>
+        prisma.classSubject.create({
+          data: { tenantId, classSectionId: section.id, subjectId },
+        }),
+      ),
+      ...(removableIds.length
+        ? [prisma.classSubject.deleteMany({ where: { id: { in: removableIds } } })]
+        : []),
+    ]);
+  }
+}
+
+async function loadSubjectWithClasses(tenantId: string, id: string) {
+  const currentSession = await prisma.academicSession.findFirst({
+    where: tenantScope(tenantId, { isCurrent: true }),
+    select: { id: true },
+  });
+  const subject = await prisma.subject.findFirst({
+    where: tenantScope(tenantId, { id }),
+    include: {
+      electiveCategory: { select: { id: true, name: true, maxSelect: true } },
+      classSubjects: {
+        where: currentSession
+          ? { classSection: { academicSessionId: currentSession.id } }
+          : { id: { in: [] } },
+        select: {
+          classSection: {
+            select: {
+              academicClass: { select: { id: true, name: true, sortOrder: true } },
+            },
+          },
+        },
+      },
+    },
+  });
+  if (!subject) throw new AppError(404, "Subject not found", "SUBJECT_NOT_FOUND");
+  const classMap = new Map<string, { id: string; name: string; sortOrder: number }>();
+  for (const assignment of subject.classSubjects) {
+    const academicClass = assignment.classSection.academicClass;
+    classMap.set(academicClass.id, academicClass);
+  }
+  const { classSubjects: _classSubjects, ...rest } = subject;
+  return {
+    ...rest,
+    applicableClasses: [...classMap.values()].sort(
+      (a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name),
+    ),
+  };
+}
+
 export async function createSubject(
   tenantId: string,
   input: {
@@ -219,6 +440,11 @@ export async function createSubject(
     code?: string | null;
     type?: SubjectType;
     deliveryType?: SubjectDeliveryType;
+    maxMarks?: number | null;
+    passMarks?: number | null;
+    isActive?: boolean;
+    sortOrder?: number;
+    classIds?: string[];
     electiveCategoryId?: string | null;
   },
 ) {
@@ -232,17 +458,39 @@ export async function createSubject(
     });
     if (!category) throw new AppError(400, "Elective category is invalid", "INVALID_ELECTIVE_CATEGORY");
   }
-  return prisma.subject.create({
+  if (
+    input.maxMarks != null &&
+    input.passMarks != null &&
+    input.passMarks > input.maxMarks
+  ) {
+    throw new AppError(400, "Pass marks cannot exceed max marks", "INVALID_MARKS");
+  }
+
+  const maxSort = await prisma.subject.aggregate({
+    where: tenantScope(tenantId, {}),
+    _max: { sortOrder: true },
+  });
+
+  const subject = await prisma.subject.create({
     data: {
       tenantId,
       name: input.name,
       code: input.code,
       type,
       deliveryType: input.deliveryType ?? SubjectDeliveryType.THEORY,
+      maxMarks: input.maxMarks ?? 100,
+      passMarks: input.passMarks ?? 33,
+      isActive: input.isActive ?? true,
+      sortOrder: input.sortOrder ?? (maxSort._max.sortOrder ?? 0) + 1,
       electiveCategoryId,
     },
-    include: { electiveCategory: { select: { id: true, name: true, maxSelect: true } } },
   });
+
+  if (input.classIds) {
+    await syncSubjectClassAssignments(tenantId, subject.id, input.classIds);
+  }
+
+  return loadSubjectWithClasses(tenantId, subject.id);
 }
 
 export async function updateSubject(
@@ -253,6 +501,11 @@ export async function updateSubject(
     code?: string | null;
     type?: SubjectType;
     deliveryType?: SubjectDeliveryType;
+    maxMarks?: number | null;
+    passMarks?: number | null;
+    isActive?: boolean;
+    sortOrder?: number;
+    classIds?: string[];
     electiveCategoryId?: string | null;
   },
 ) {
@@ -267,18 +520,60 @@ export async function updateSubject(
     });
     if (!category) throw new AppError(400, "Elective category is invalid", "INVALID_ELECTIVE_CATEGORY");
   }
-  return prisma.subject.update({
+
+  const existing = await prisma.subject.findFirst({
+    where: tenantScope(tenantId, { id }),
+    select: { maxMarks: true, passMarks: true },
+  });
+  const nextMax = input.maxMarks !== undefined ? input.maxMarks : existing?.maxMarks;
+  const nextPass = input.passMarks !== undefined ? input.passMarks : existing?.passMarks;
+  if (nextMax != null && nextPass != null && nextPass > nextMax) {
+    throw new AppError(400, "Pass marks cannot exceed max marks", "INVALID_MARKS");
+  }
+
+  await prisma.subject.update({
     where: { id },
     data: {
       name: input.name,
       code: input.code,
       type: input.type,
       deliveryType: input.deliveryType,
+      maxMarks: input.maxMarks,
+      passMarks: input.passMarks,
+      isActive: input.isActive,
+      sortOrder: input.sortOrder,
       ...(input.electiveCategoryId !== undefined || nextType === SubjectType.CORE
         ? { electiveCategoryId }
         : {}),
     },
-    include: { electiveCategory: { select: { id: true, name: true, maxSelect: true } } },
+  });
+
+  if (input.classIds) {
+    await syncSubjectClassAssignments(tenantId, id, input.classIds);
+  }
+
+  return loadSubjectWithClasses(tenantId, id);
+}
+
+export async function reorderSubjects(tenantId: string, orderedIds: string[]) {
+  const uniqueIds = [...new Set(orderedIds)];
+  const count = await prisma.subject.count({
+    where: tenantScope(tenantId, { id: { in: uniqueIds } }),
+  });
+  if (count !== uniqueIds.length) {
+    throw new AppError(400, "One or more subjects are invalid", "INVALID_SUBJECT");
+  }
+  await prisma.$transaction(
+    uniqueIds.map((id, index) =>
+      prisma.subject.update({
+        where: { id },
+        data: { sortOrder: index + 1 },
+      }),
+    ),
+  );
+  return prisma.subject.findMany({
+    where: tenantScope(tenantId, {}),
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
 }
 
@@ -549,27 +844,53 @@ export async function createClassSection(
   input: {
     academicSessionId: string;
     classId: string;
-    sectionId: string;
+    sectionId?: string;
+    sectionName?: string;
     classTeacherId?: string | null;
+    roomNo?: string | null;
+    capacity?: number | null;
   },
 ) {
-  const [session, academicClass, section] = await Promise.all([
+  const [session, academicClass] = await Promise.all([
     prisma.academicSession.findFirst({
       where: tenantScope(tenantId, { id: input.academicSessionId }),
     }),
     prisma.academicClass.findFirst({ where: tenantScope(tenantId, { id: input.classId }) }),
-    prisma.section.findFirst({ where: tenantScope(tenantId, { id: input.sectionId }) }),
   ]);
-  if (!session || !academicClass || !section) {
-    throw new AppError(400, "Session, class, or section is invalid", "INVALID_ACADEMIC_SETUP");
+  if (!session || !academicClass) {
+    throw new AppError(400, "Session or class is invalid", "INVALID_ACADEMIC_SETUP");
   }
+
+  let sectionId = input.sectionId;
+  if (!sectionId) {
+    const sectionName = input.sectionName?.trim();
+    if (!sectionName) {
+      throw new AppError(400, "Section name is required", "SECTION_NAME_REQUIRED");
+    }
+    const existingSection = await prisma.section.findFirst({
+      where: tenantScope(tenantId, { name: sectionName }),
+    });
+    sectionId = existingSection
+      ? existingSection.id
+      : (
+          await prisma.section.create({
+            data: { tenantId, name: sectionName },
+          })
+        ).id;
+  } else {
+    const section = await prisma.section.findFirst({
+      where: tenantScope(tenantId, { id: sectionId }),
+    });
+    if (!section) throw new AppError(400, "Section is invalid", "INVALID_ACADEMIC_SETUP");
+  }
+
   await requireTenantTeacher(tenantId, input.classTeacherId);
 
   const existing = await prisma.classSection.findFirst({
     where: tenantScope(tenantId, {
       academicSessionId: input.academicSessionId,
       classId: input.classId,
-      sectionId: input.sectionId,
+      sectionId,
     }),
     include: { academicClass: true, section: true },
   });
@@ -582,25 +903,75 @@ export async function createClassSection(
   }
 
   return prisma.classSection.create({
-    data: { tenantId, ...input },
-    include: { academicClass: true, section: true, classTeacher: true },
+    data: {
+      tenantId,
+      academicSessionId: input.academicSessionId,
+      classId: input.classId,
+      sectionId,
+      classTeacherId: input.classTeacherId ?? null,
+      roomNo: input.roomNo?.trim() || null,
+      capacity: input.capacity ?? null,
+    },
+    include: {
+      academicClass: true,
+      section: true,
+      classTeacher: { select: { id: true, firstName: true, lastName: true, email: true } },
+      _count: { select: { enrollments: true } },
+    },
   });
 }
 
 export async function updateClassSection(
   tenantId: string,
   id: string,
-  input: { classTeacherId?: string | null },
+  input: {
+    classTeacherId?: string | null;
+    roomNo?: string | null;
+    capacity?: number | null;
+  },
 ) {
   const record = await prisma.classSection.findFirst({
     where: tenantScope(tenantId, { id }),
   });
   if (!record) throw new AppError(404, "Class section not found", "CLASS_SECTION_NOT_FOUND");
-  await requireTenantTeacher(tenantId, input.classTeacherId);
+  if (input.classTeacherId !== undefined) {
+    await requireTenantTeacher(tenantId, input.classTeacherId);
+  }
   return prisma.classSection.update({
     where: { id },
-    data: input,
-    include: { academicClass: true, section: true, classTeacher: true },
+    data: {
+      ...(input.classTeacherId !== undefined ? { classTeacherId: input.classTeacherId } : {}),
+      ...(input.roomNo !== undefined ? { roomNo: input.roomNo?.trim() || null } : {}),
+      ...(input.capacity !== undefined ? { capacity: input.capacity } : {}),
+    },
+    include: {
+      academicClass: true,
+      section: true,
+      classTeacher: { select: { id: true, firstName: true, lastName: true, email: true } },
+      _count: { select: { enrollments: true } },
+    },
+  });
+}
+
+export async function reorderClasses(tenantId: string, orderedIds: string[]) {
+  const uniqueIds = [...new Set(orderedIds)];
+  const count = await prisma.academicClass.count({
+    where: tenantScope(tenantId, { id: { in: uniqueIds } }),
+  });
+  if (count !== uniqueIds.length) {
+    throw new AppError(400, "One or more classes are invalid", "INVALID_CLASS");
+  }
+  await prisma.$transaction(
+    uniqueIds.map((id, index) =>
+      prisma.academicClass.update({
+        where: { id },
+        data: { sortOrder: index + 1 },
+      }),
+    ),
+  );
+  return prisma.academicClass.findMany({
+    where: tenantScope(tenantId, {}),
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
 }
 

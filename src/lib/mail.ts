@@ -2,6 +2,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 import { env } from "../config/env.js";
 import { AppError } from "./errors.js";
 import { getTenantIntegration } from "../modules/erp/erp.service.js";
+import { logEmailDelivery } from "../modules/erp/email-gateway.service.js";
 
 function createEnvTransporter(): Transporter | null {
   if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
@@ -84,9 +85,21 @@ export async function sendMail(input: {
   text: string;
   html?: string;
   tenantId?: string;
+  category?: string;
 }) {
   const resolved = await resolveTransporter(input.tenantId);
   if (!resolved.transporter) {
+    if (input.tenantId) {
+      await logEmailDelivery({
+        tenantId: input.tenantId,
+        toEmail: input.to,
+        subject: input.subject,
+        body: input.text,
+        status: "SKIPPED",
+        category: input.category ?? "SYSTEM",
+        errorMessage: "Email not configured",
+      }).catch(() => undefined);
+    }
     if (env.NODE_ENV === "production") {
       throw new AppError(503, "Email delivery is not configured", "MAIL_NOT_CONFIGURED");
     }
@@ -110,10 +123,32 @@ export async function sendMail(input: {
         "X-Entity-Ref-ID": `saas-cms-lms-${Date.now()}`,
       },
     });
+    if (input.tenantId) {
+      await logEmailDelivery({
+        tenantId: input.tenantId,
+        toEmail: input.to,
+        subject: input.subject,
+        body: input.text,
+        status: "SUCCESS",
+        gatewayName: resolved.fromName || "SMTP",
+        category: input.category ?? "TRANSACTIONAL",
+      }).catch(() => undefined);
+    }
     console.info(`[mail] Delivered to ${input.to} messageId=${info.messageId}`);
     return { delivered: true as const, messageId: info.messageId };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to send email";
+    if (input.tenantId) {
+      await logEmailDelivery({
+        tenantId: input.tenantId,
+        toEmail: input.to,
+        subject: input.subject,
+        body: input.text,
+        status: "FAILED",
+        category: input.category ?? "TRANSACTIONAL",
+        errorMessage: message,
+      }).catch(() => undefined);
+    }
     console.error(`[mail] Send failed: ${message}`);
     throw new AppError(502, "Failed to send email", "MAIL_SEND_FAILED");
   }

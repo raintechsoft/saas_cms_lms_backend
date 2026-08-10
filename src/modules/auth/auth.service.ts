@@ -113,6 +113,14 @@ export async function buildLoginResult(
 ) {
   assertUserCanSignIn(user);
 
+  const roleCodes = user.roles.map(({ role }) => role.code);
+  if (user.tenantId && roleCodes.includes("STUDENT")) {
+    const { assertStudentLoginAllowed } = await import(
+      "../erp/student-access-settings.service.js"
+    );
+    await assertStudentLoginAllowed(user.tenantId);
+  }
+
   const accessToken = jwt.sign(
     {
       tenantId: user.tenantId,

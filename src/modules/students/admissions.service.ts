@@ -39,6 +39,17 @@ export async function getPublicAdmissionForm(tenantSlug: string) {
       orderBy: { sortOrder: "asc" },
     }),
   ]);
+  let admissionFeeType: { id: string; name: string } | null = null;
+  if (tenant.setting.onlineAdmissionRequirePayment && tenant.setting.onlineAdmissionFeeTypeId) {
+    admissionFeeType = await prisma.feeType.findFirst({
+      where: tenantScope(tenant.id, {
+        id: tenant.setting.onlineAdmissionFeeTypeId,
+        isActive: true,
+      }),
+      select: { id: true, name: true },
+    });
+  }
+
   return {
     tenant: {
       id: tenant.id,
@@ -59,6 +70,10 @@ export async function getPublicAdmissionForm(tenantSlug: string) {
       options: field.options,
       isRequired: field.isRequired,
     })),
+    payment: {
+      required: Boolean(tenant.setting.onlineAdmissionRequirePayment),
+      feeType: admissionFeeType,
+    },
   };
 }
 

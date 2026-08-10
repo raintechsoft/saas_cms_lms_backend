@@ -7,6 +7,7 @@ const DEFAULT_LOAN_DAYS = 14;
 
 export type LibraryCategoryInput = {
   name: string;
+  parentId?: string | null;
   isActive?: boolean;
   notes?: string | null;
 };
@@ -72,9 +73,17 @@ export async function listLibraryCategories(tenantId: string) {
 }
 
 export async function createLibraryCategory(tenantId: string, input: LibraryCategoryInput) {
+  if (input.parentId) {
+    const parent = await prisma.libraryCategory.findFirst({
+      where: tenantScope(tenantId, { id: input.parentId }),
+      select: { id: true },
+    });
+    if (!parent) throw new AppError(400, "Parent category is invalid", "LIBRARY_PARENT_INVALID");
+  }
   return prisma.libraryCategory.create({
     data: {
       tenantId,
+      parentId: input.parentId ?? null,
       name: input.name.trim(),
       isActive: input.isActive ?? true,
       notes: input.notes?.trim() || null,
@@ -94,10 +103,22 @@ export async function updateLibraryCategory(
   });
   if (!found) throw new AppError(404, "Library category not found", "LIBRARY_CATEGORY_NOT_FOUND");
 
+  if (input.parentId !== undefined && input.parentId !== null) {
+    if (input.parentId === id) {
+      throw new AppError(400, "Category cannot be its own parent", "LIBRARY_PARENT_INVALID");
+    }
+    const parent = await prisma.libraryCategory.findFirst({
+      where: tenantScope(tenantId, { id: input.parentId }),
+      select: { id: true },
+    });
+    if (!parent) throw new AppError(400, "Parent category is invalid", "LIBRARY_PARENT_INVALID");
+  }
+
   return prisma.libraryCategory.update({
     where: { id },
     data: {
       ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
       ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       ...(input.notes !== undefined ? { notes: input.notes?.trim() || null } : {}),
     },

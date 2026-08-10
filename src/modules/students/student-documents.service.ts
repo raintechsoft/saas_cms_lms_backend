@@ -10,17 +10,17 @@ function studentName(firstName: string, lastName?: string | null) {
 
 export async function listStudentDocumentFolders(tenantId: string) {
   return prisma.studentDocumentFolder.findMany({
-    where: tenantScope(tenantId, {}),
+    where: tenantScope(tenantId, { deletedAt: null, isActive: true }),
     include: {
       _count: {
         select: {
-          documents: true,
-          children: true,
+          documents: { where: { deletedAt: null } },
+          children: { where: { deletedAt: null } },
         },
       },
       parent: { select: { id: true, name: true } },
     },
-    orderBy: { name: "asc" },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   });
 }
 

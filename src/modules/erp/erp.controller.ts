@@ -18,7 +18,9 @@ import {
   deletePaymentMethod,
   deleteStudentDocument,
   getErpSetup,
+  listLanguages,
   restoreConfigurationBackup,
+  syncLanguages,
   updateCustomField,
   updateIntegrationSetting,
   updatePaymentMethod,
@@ -59,6 +61,19 @@ const languageBody = z.object({
   isEnabled: z.boolean().default(true),
   isDefault: z.boolean().default(false),
 });
+const languageSyncBody = z.object({
+  defaultCode: z.string().trim().min(2).max(10).transform((value) => value.toLowerCase()),
+  languages: z
+    .array(
+      z.object({
+        code: z.string().trim().min(2).max(10).transform((value) => value.toLowerCase()),
+        name: z.string().trim().min(1).max(100),
+        isEnabled: z.boolean(),
+      }),
+    )
+    .min(1)
+    .max(40),
+});
 const customFieldBody = z.object({
   target: z.nativeEnum(CustomFieldTarget),
   key: z.string().trim().regex(/^[a-z][a-z0-9_]*$/).max(100),
@@ -96,6 +111,8 @@ const holidayBody = z.object({
 const folderBody = z.object({
   name: z.string().trim().min(1).max(100),
   parentId: z.string().min(1).nullable().optional(),
+  description: z.string().trim().max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
 });
 const studentDocumentBody = z.object({
   studentId: z.string().min(1),
@@ -155,9 +172,19 @@ export async function upsertModuleController(req: Request, res: Response) {
   });
 }
 
+export async function listLanguagesController(req: Request, res: Response) {
+  res.json({ data: await listLanguages(req.auth!.tenantId!) });
+}
+
 export async function upsertLanguageController(req: Request, res: Response) {
   res.json({
     data: await upsertLanguage(req.auth!.tenantId!, languageBody.parse(req.body)),
+  });
+}
+
+export async function syncLanguagesController(req: Request, res: Response) {
+  res.json({
+    data: await syncLanguages(req.auth!.tenantId!, languageSyncBody.parse(req.body)),
   });
 }
 

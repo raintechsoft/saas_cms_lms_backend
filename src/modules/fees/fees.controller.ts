@@ -24,8 +24,10 @@ import {
   deleteReceiptBook,
   getFeeInvoice,
   getFeePayment,
+  getFeeSettings,
   getFeeSetup,
   getFeeSummary,
+  updateFeeSettings,
   listFeeInvoices,
   listFeeMasterAssignCandidates,
   listStudentFees,
@@ -49,23 +51,29 @@ import {
 } from "./fee-reminders.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
+const feeHeadKind = z.enum(["MANDATORY", "ONE_TIME", "OPTIONAL", "REFUNDABLE"]);
 const feeTypeBody = z.object({
   name: z.string().trim().min(1).max(100),
   code: z.string().trim().max(30).nullable().optional(),
   description: z.string().trim().max(1000).nullable().optional(),
-});
-const feeTypeUpdateBody = feeTypeBody.partial().extend({
+  kind: feeHeadKind.optional(),
+  applicableTo: z.string().trim().min(1).max(120).optional(),
+  gstApplicable: z.boolean().optional(),
+  defaultAmount: z.coerce.number().min(0).max(10_000_000).optional(),
   isActive: z.boolean().optional(),
 });
+const feeTypeUpdateBody = feeTypeBody.partial();
 const feeGroupBody = z.object({
   name: z.string().trim().min(1).max(100),
   description: z.string().trim().max(1000).nullable().optional(),
-  feeTypeIds: z.array(z.string().min(1)).min(1),
+  feeTypeIds: z.array(z.string().min(1)).max(200).default([]),
+  isActive: z.boolean().optional(),
 });
 const feeGroupUpdateBody = z.object({
   name: z.string().trim().min(1).max(100).optional(),
   description: z.string().trim().max(1000).nullable().optional(),
-  feeTypeIds: z.array(z.string().min(1)).min(1).optional(),
+  feeTypeIds: z.array(z.string().min(1)).max(200).optional(),
+  isActive: z.boolean().optional(),
 });
 const discountBody = z.object({
   name: z.string().trim().min(1).max(100),
@@ -208,6 +216,23 @@ const carryForwardBody = z.object({
 
 export async function getFeeSetupController(req: Request, res: Response) {
   res.json({ data: await getFeeSetup(req.auth!.tenantId!) });
+}
+
+const feeSettingsBody = z.object({
+  allowDuplicateInvoice: z.boolean().optional(),
+  allowCustomFeeReceipt: z.boolean().optional(),
+  dueDateWiseFeeOrdering: z.boolean().optional(),
+  feesDueDays: z.coerce.number().int().min(1).max(365).optional(),
+});
+
+export async function getFeeSettingsController(req: Request, res: Response) {
+  res.json({ data: await getFeeSettings(req.auth!.tenantId!) });
+}
+
+export async function updateFeeSettingsController(req: Request, res: Response) {
+  res.json({
+    data: await updateFeeSettings(req.auth!.tenantId!, feeSettingsBody.parse(req.body)),
+  });
 }
 
 export async function createFeeTypeController(req: Request, res: Response) {

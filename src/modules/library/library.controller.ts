@@ -20,6 +20,7 @@ const idParams = z.object({ id: z.string().min(1) });
 
 const categoryBody = z.object({
   name: z.string().trim().min(1).max(120),
+  parentId: z.string().min(1).nullable().optional(),
   isActive: z.boolean().optional(),
   notes: z.string().trim().max(5000).nullable().optional(),
 });

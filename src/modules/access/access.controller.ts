@@ -2,27 +2,43 @@ import { UserStatus } from "@prisma/client";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import {
+  assignStaffToRole,
   createRole,
   createUser,
   deleteRole,
   deleteUser,
+  getStaffRolesSetup,
   getUser,
   listPermissions,
   listRoles,
   listUsers,
+  removeStaffFromRole,
   updateRole,
   updateUser,
 } from "./access.service.js";
 
 const idParams = z.object({ id: z.string().min(1) });
+const roleUserParams = z.object({
+  id: z.string().min(1),
+  userId: z.string().min(1),
+});
 const roleBody = z.object({
   name: z.string().trim().min(2).max(100),
   code: z.string().trim().min(2).max(60)
     .transform((value) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "_")),
   description: z.string().trim().max(500).nullable().optional(),
   permissionIds: z.array(z.string().min(1)).default([]),
+  isActive: z.boolean().optional(),
 });
-const updateRoleBody = roleBody.omit({ code: true });
+const updateRoleBody = z.object({
+  name: z.string().trim().min(2).max(100).optional(),
+  description: z.string().trim().max(500).nullable().optional(),
+  permissionIds: z.array(z.string().min(1)).optional(),
+  isActive: z.boolean().optional(),
+});
+const assignStaffBody = z.object({
+  userIds: z.array(z.string().min(1)).min(1).max(500),
+});
 const createUserBody = z.object({
   email: z.string().email(),
   firstName: z.string().trim().min(1).max(100),
@@ -76,6 +92,25 @@ export async function deleteRoleController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   await deleteRole(req.auth!.tenantId!, id);
   res.status(204).send();
+}
+
+export async function getStaffRolesSetupController(req: Request, res: Response) {
+  res.json({ data: await getStaffRolesSetup(req.auth!.tenantId!) });
+}
+
+export async function assignStaffToRoleController(req: Request, res: Response) {
+  const { id } = idParams.parse(req.params);
+  const { userIds } = assignStaffBody.parse(req.body);
+  res.json({
+    data: await assignStaffToRole(req.auth!.tenantId!, id, userIds),
+  });
+}
+
+export async function removeStaffFromRoleController(req: Request, res: Response) {
+  const { id, userId } = roleUserParams.parse(req.params);
+  res.json({
+    data: await removeStaffFromRole(req.auth!.tenantId!, id, userId),
+  });
 }
 
 export async function listUsersController(req: Request, res: Response) {

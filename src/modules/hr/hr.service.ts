@@ -122,6 +122,7 @@ export async function getHrSetup(tenantId: string, month = new Date()) {
     staffNumbering: {
       auto: setting?.autoStaffNumber ?? false,
       prefix: setting?.staffPrefix ?? "STF-",
+      digits: setting?.staffNumberDigits ?? 4,
       next: setting?.nextStaffNumber ?? 1,
     },
   };
@@ -161,50 +162,81 @@ export async function deleteDesignation(tenantId: string, id: string) {
 
 export async function createStaffLeaveType(
   tenantId: string,
-  input: { name: string; annualLimit?: number | null },
+  input: Parameters<typeof import("./leave-types-settings.service.js").createLeaveType>[1],
 ) {
-  return prisma.staffLeaveType.create({ data: { tenantId, ...input } });
+  const { createLeaveType } = await import("./leave-types-settings.service.js");
+  return createLeaveType(tenantId, input);
 }
 
 export async function updateStaffLeaveType(
   tenantId: string,
   id: string,
-  input: { name?: string; annualLimit?: number | null },
+  input: Parameters<typeof import("./leave-types-settings.service.js").updateLeaveType>[2],
 ) {
-  const found = await prisma.staffLeaveType.findFirst({ where: tenantScope(tenantId, { id }) });
-  if (!found) throw new AppError(404, "Leave type not found", "LEAVE_TYPE_NOT_FOUND");
-  return prisma.staffLeaveType.update({ where: { id }, data: input });
+  const { updateLeaveType } = await import("./leave-types-settings.service.js");
+  return updateLeaveType(tenantId, id, input);
 }
 
 export async function deleteStaffLeaveType(tenantId: string, id: string) {
-  const found = await prisma.staffLeaveType.findFirst({ where: tenantScope(tenantId, { id }) });
-  if (!found) throw new AppError(404, "Leave type not found", "LEAVE_TYPE_NOT_FOUND");
-  const used = await prisma.staffLeave.count({ where: tenantScope(tenantId, { leaveTypeId: id }) });
-  if (used) {
-    throw new AppError(409, "Leave type is used by existing leave records", "LEAVE_TYPE_IN_USE");
-  }
-  await prisma.staffLeaveType.delete({ where: { id } });
+  const { deleteLeaveType } = await import("./leave-types-settings.service.js");
+  return deleteLeaveType(tenantId, id);
 }
 
 export async function createPayParameter(
   tenantId: string,
-  input: { name: string; type: AdjustmentType; defaultAmount: number },
+  input: {
+    name: string;
+    type: AdjustmentType;
+    defaultAmount: number;
+    shortCode?: string | null;
+    taxable?: boolean;
+    isActive?: boolean;
+  },
 ) {
   const exists = await prisma.payParameter.findFirst({
     where: tenantScope(tenantId, { name: input.name }),
   });
   if (exists) throw new AppError(409, "Parameter already exists", "PARAMETER_EXISTS");
-  return prisma.payParameter.create({ data: { tenantId, ...input } });
+  return prisma.payParameter.create({
+    data: {
+      tenantId,
+      name: input.name,
+      type: input.type,
+      defaultAmount: input.defaultAmount,
+      shortCode: input.shortCode?.trim().toUpperCase() || null,
+      taxable: input.taxable ?? input.type === "EARNING",
+      isActive: input.isActive ?? true,
+    },
+  });
 }
 
 export async function updatePayParameter(
   tenantId: string,
   id: string,
-  input: { name?: string; type?: AdjustmentType; defaultAmount?: number },
+  input: {
+    name?: string;
+    type?: AdjustmentType;
+    defaultAmount?: number;
+    shortCode?: string | null;
+    taxable?: boolean;
+    isActive?: boolean;
+  },
 ) {
   const found = await prisma.payParameter.findFirst({ where: tenantScope(tenantId, { id }) });
   if (!found) throw new AppError(404, "Parameter not found", "PARAMETER_NOT_FOUND");
-  return prisma.payParameter.update({ where: { id }, data: input });
+  return prisma.payParameter.update({
+    where: { id },
+    data: {
+      ...(input.name != null ? { name: input.name } : {}),
+      ...(input.type != null ? { type: input.type } : {}),
+      ...(input.defaultAmount != null ? { defaultAmount: input.defaultAmount } : {}),
+      ...(input.shortCode !== undefined
+        ? { shortCode: input.shortCode?.trim().toUpperCase() || null }
+        : {}),
+      ...(input.taxable != null ? { taxable: input.taxable } : {}),
+      ...(input.isActive != null ? { isActive: input.isActive } : {}),
+    },
+  });
 }
 
 export async function deletePayParameter(tenantId: string, id: string) {
@@ -329,7 +361,9 @@ export async function createStaffProfile(
         where: { tenantId },
         data: { nextStaffNumber: { increment: 1 } },
       });
-      employeeNumber = `${setting.staffPrefix ?? "STF-"}${updated.nextStaffNumber - 1}`;
+      const sequence = updated.nextStaffNumber - 1;
+      const digits = Math.max(1, updated.staffNumberDigits ?? 4);
+      employeeNumber = `${updated.staffPrefix ?? setting.staffPrefix ?? "STF-"}${String(sequence).padStart(digits, "0")}`;
     }
     let userId = input.userId;
     if (!userId && input.newUser) {
