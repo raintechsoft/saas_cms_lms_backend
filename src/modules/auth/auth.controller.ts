@@ -4,6 +4,7 @@ import { AppError } from "../../lib/errors.js";
 import { persistAvatarUpload } from "../../lib/uploads.js";
 import {
   changePassword,
+  deleteOwnAccount,
   forgotPassword,
   getAuthPublicConfig,
   getCurrentUser,
@@ -64,6 +65,10 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8).max(200),
 });
 
+const deleteAccountSchema = z.object({
+  password: z.string().min(1).max(200),
+});
+
 export async function loginController(req: Request, res: Response) {
   const input = loginSchema.parse(req.body);
   const result = await login(input);
@@ -90,6 +95,11 @@ export async function updateProfileController(req: Request, res: Response) {
 export async function changePasswordController(req: Request, res: Response) {
   const input = changePasswordSchema.parse(req.body);
   res.json({ data: await changePassword(req.auth!.userId, input) });
+}
+
+export async function deleteAccountController(req: Request, res: Response) {
+  const input = deleteAccountSchema.parse(req.body);
+  res.json({ data: await deleteOwnAccount(req.auth!.userId, input) });
 }
 
 export async function uploadAvatarController(req: Request, res: Response) {

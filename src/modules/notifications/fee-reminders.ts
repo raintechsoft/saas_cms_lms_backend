@@ -9,12 +9,14 @@ import {
   UserStatus,
 } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
-import { env } from "../../config/env.js";
 import { prisma } from "../../lib/prisma.js";
 import { sendMail } from "../../lib/mail.js";
-import { isPushConfigured, sendWebPush } from "../../lib/push.js";
 import { sendSms } from "../../lib/sms.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
+import {
+  dispatchPortalUserAlert,
+  getTenantDisplayName,
+} from "../mobile/portal-alert.service.js";
 
 export type FeeReminderStep = {
   days: number;
@@ -147,40 +149,6 @@ async function sendEmailOnly(to: string, subject: string, text: string, tenantId
   }
 }
 
-async function sendPushToTargetUser(
-  tenantId: string,
-  userId: string,
-  payload: { title: string; body: string; type: string; url?: string },
-) {
-  if (!isPushConfigured()) return { delivered: 0, failed: 0 };
-  const subscriptions = await prisma.pushSubscription.findMany({
-    where: { tenantId, userId },
-    select: { endpoint: true, p256dh: true, auth: true, id: true },
-  });
-  if (!subscriptions.length) return { delivered: 0, failed: 0 };
-
-  let delivered = 0;
-  let failed = 0;
-  for (const sub of subscriptions) {
-    const result = await sendWebPush(sub, payload);
-    if (result.delivered) {
-      delivered += 1;
-      continue;
-    }
-    failed += 1;
-    if (result.statusCode === 404 || result.statusCode === 410) {
-      await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
-    }
-  }
-  return { delivered, failed };
-}
-
-function portalUrlForAudience(audience: NoticeAudience) {
-  const path =
-    audience === NoticeAudience.PARENTS ? "/#/portal/parent" : "/#/portal/student";
-  return `${env.WEB_ORIGIN}${path}`;
-}
-
 type StudentBucket = {
   classSectionId: string;
   balance: number;
@@ -207,6 +175,8 @@ export async function sendFeeRemindersForSession(
   });
   if (!session) throw new AppError(404, "Academic session not found", "SESSION_NOT_FOUND");
 
+  const tenantName = await getTenantDisplayName(tenantId);
+
   const asOf = new Date();
   const minBalance = options.minBalance ?? 0;
   const assignments = await prisma.studentFeeAssignment.findMany({
@@ -225,6 +195,7 @@ export async function sendFeeRemindersForSession(
           student: {
             select: {
               id: true,
+              userId: true,
               firstName: true,
               lastName: true,
               email: true,
@@ -288,7 +259,7 @@ export async function sendFeeRemindersForSession(
     const studentName =
       [student.firstName, student.lastName].filter(Boolean).join(" ").trim() || "Student";
     const coveredEmails = new Set<string>();
-    const studentUserId = student.user?.id ?? null;
+    const studentUserId = student.user?.id ?? student.userId ?? null;
     const studentEmail =
       normalizeEmail(student.user?.email) ?? normalizeEmail(student.email);
     if (studentEmail) coveredEmails.add(studentEmail);
@@ -348,6 +319,8 @@ export async function sendFeeRemindersForSession(
   for (const item of byStudent.values()) {
     const title = item.notice || options.title || "Fee payment reminder";
     const amount = item.balance.toFixed(2);
+    const studentPushBody = `Outstanding balance ₹${amount} for ${session.name}. Please pay at your earliest convenience.`;
+    const parentPushBody = `${item.studentName} has an outstanding balance of ₹${amount} for ${session.name}. Please arrange payment soon.`;
     const studentBody = [
       `Hello ${item.studentName},`,
       ``,
@@ -381,14 +354,21 @@ export async function sendFeeRemindersForSession(
           targetUserId: item.studentUserId,
         },
       });
-      const push = await sendPushToTargetUser(tenantId, item.studentUserId, {
+      const push = await dispatchPortalUserAlert(tenantId, item.studentUserId, {
+        category: "FEE_REMINDER",
         title,
-        body: studentBody,
+        body: studentPushBody,
         type: NotificationType.FEE_OVERDUE,
-        url: portalUrlForAudience(NoticeAudience.STUDENTS),
+        screen: "fees",
+        tenantName,
       });
       pushSent += push.delivered;
       pushFailed += push.failed;
+      if (push.mobile.failed > 0 || push.mobile.deviceCount === 0) {
+        console.warn(
+          `[fee-reminders] Student push user=${item.studentUserId} devices=${push.mobile.deviceCount} delivered=${push.mobile.delivered} failed=${push.mobile.failed}`,
+        );
+      }
       sent += 1;
     }
 
@@ -405,11 +385,13 @@ export async function sendFeeRemindersForSession(
           targetUserId: parent.userId,
         },
       });
-      const push = await sendPushToTargetUser(tenantId, parent.userId, {
+      const push = await dispatchPortalUserAlert(tenantId, parent.userId, {
+        category: "FEE_REMINDER",
         title,
-        body: parentBody,
+        body: parentPushBody,
         type: NotificationType.FEE_OVERDUE,
-        url: portalUrlForAudience(NoticeAudience.PARENTS),
+        screen: "fees",
+        tenantName,
       });
       pushSent += push.delivered;
       pushFailed += push.failed;

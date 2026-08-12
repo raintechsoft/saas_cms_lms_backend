@@ -9,6 +9,7 @@ import {
   createPortalLeaveController,
   getPortalAttendanceController,
   getPortalDocumentsController,
+  getPortalGeneratedDocumentController,
   getPortalFeesController,
   getPortalHomeworkController,
   getPortalLeavesController,
@@ -65,6 +66,10 @@ portalRouter.post(
   asyncHandler(confirmPortalOnlineOrderController),
 );
 portalRouter.get("/children/:studentId/documents", asyncHandler(getPortalDocumentsController));
+portalRouter.get(
+  "/children/:studentId/documents/generated/:documentId",
+  asyncHandler(getPortalGeneratedDocumentController),
+);
 portalRouter.post(
   "/children/:studentId/documents",
   documentUpload.single("file"),

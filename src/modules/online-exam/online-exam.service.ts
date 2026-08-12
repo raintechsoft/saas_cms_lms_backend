@@ -201,6 +201,19 @@ export async function updateOnlineExam(
   });
   if (!found) throw new AppError(404, "Online exam not found", "ONLINE_EXAM_NOT_FOUND");
 
+  if (input.status === OnlineExamStatus.PUBLISHED) {
+    const questionCount = await prisma.onlineExamQuestion.count({
+      where: tenantScope(tenantId, { examId: id }),
+    });
+    if (questionCount === 0) {
+      throw new AppError(
+        400,
+        "Add at least one question before publishing the exam",
+        "EXAM_NO_QUESTIONS",
+      );
+    }
+  }
+
   return prisma.onlineExam.update({
     where: { id },
     data: {

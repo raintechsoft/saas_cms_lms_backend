@@ -8,6 +8,7 @@ import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 import { createLeave } from "../attendance/attendance.service.js";
+import { getGeneratedDocument } from "../documents/documents.service.js";
 import { listStudentFees } from "../fees/fees.service.js";
 import { addTeacherRating } from "../hr/hr.service.js";
 import { submitHomework } from "../homework/homework.service.js";
@@ -222,6 +223,8 @@ export async function getPortalChildDocuments(
     certificates: generated.map((doc) => ({
       id: doc.id,
       name: doc.template?.name ?? "Certificate",
+      templateType: doc.template?.type ?? null,
+      examId: doc.examId,
       createdAt: doc.generatedAt,
       serialNumber: doc.serialNumber,
     })),
@@ -530,4 +533,20 @@ export async function submitPortalTeacherRating(
     comment: input.comment,
     ratingDate: input.ratingDate,
   });
+}
+
+export async function getPortalGeneratedDocument(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+  documentId: string,
+) {
+  assertProductMode(productMode, "CMS");
+  await assertAccessibleStudent(tenantId, viewer, studentId);
+  const document = await getGeneratedDocument(tenantId, documentId);
+  if (document.studentId !== studentId) {
+    throw new AppError(403, "Document not accessible", "PORTAL_FORBIDDEN");
+  }
+  return document;
 }

@@ -196,18 +196,16 @@ function parseSteps(setting: {
 }): FeeReminderStep[] {
   const raw = setting.reminderSteps;
   if (Array.isArray(raw) && raw.length) {
-    return raw
-      .map((item) => {
-        const row = (item ?? {}) as Record<string, unknown>;
-        return {
-          days: Math.max(0, Math.trunc(Number(row.days) || 0)),
-          when: row.when === "before" ? ("before" as const) : ("after" as const),
-          notice: String(row.notice || "Fee reminder"),
-          email: Boolean(row.email) && setting.reminderEmailEnabled,
-          sms: Boolean(row.sms) && setting.reminderSmsEnabled,
-        };
-      })
-      .filter((step) => step.email || step.sms);
+    return raw.map((item) => {
+      const row = (item ?? {}) as Record<string, unknown>;
+      return {
+        days: Math.max(0, Math.trunc(Number(row.days) || 0)),
+        when: row.when === "before" ? ("before" as const) : ("after" as const),
+        notice: String(row.notice || "Fee reminder"),
+        email: Boolean(row.email) && setting.reminderEmailEnabled,
+        sms: Boolean(row.sms) && setting.reminderSmsEnabled,
+      };
+    });
   }
   return [
     {
@@ -224,7 +222,7 @@ function parseSteps(setting: {
       email: setting.reminderEmailEnabled,
       sms: setting.reminderSmsEnabled,
     },
-  ].filter((step) => step.email || step.sms);
+  ];
 }
 
 function sameCalendarDay(a: Date, b: Date) {
@@ -271,11 +269,6 @@ export async function processScheduledFeeReminders() {
         reminderEmailEnabled: setting.reminderEmailEnabled,
         reminderSmsEnabled: setting.reminderSmsEnabled,
       });
-      if (!steps.length) {
-        console.info(`[fee-reminders] tenant=${setting.tenantId} skipped — no email/SMS steps enabled`);
-        continue;
-      }
-
       const result = await sendFeeRemindersForSession(setting.tenantId, actorId, session.id, {
         mode: "schedule_steps",
         steps,
@@ -288,7 +281,7 @@ export async function processScheduledFeeReminders() {
       });
 
       console.info(
-        `[fee-reminders] tenant=${setting.tenantId} session=${session.name} notices=${result.count} smsSent=${result.smsSent} smsFailed=${result.smsFailed}`,
+        `[fee-reminders] tenant=${setting.tenantId} session=${session.name} notices=${result.count} pushSent=${result.pushSent} pushFailed=${result.pushFailed} smsSent=${result.smsSent} smsFailed=${result.smsFailed}`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "reminder job failed";

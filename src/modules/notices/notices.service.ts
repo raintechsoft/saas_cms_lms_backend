@@ -1,7 +1,11 @@
-import { NoticeAudience } from "@prisma/client";
+import { NoticeAudience, NotificationType } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
+import {
+  dispatchPortalAudienceAlert,
+  getTenantDisplayName,
+} from "../mobile/portal-alert.service.js";
 
 export async function listNotices(tenantId: string) {
   return prisma.notice.findMany({
@@ -34,19 +38,59 @@ export async function createNotice(
     });
     if (!section) throw new AppError(400, "Invalid class section", "INVALID_CLASS_SECTION");
   }
-  return prisma.notice.create({
+
+  const audience = input.audience ?? NoticeAudience.ALL;
+  const tenantName = await getTenantDisplayName(tenantId);
+
+  const notice = await prisma.notice.create({
     data: {
       tenantId,
       createdById,
       title: input.title.trim(),
       body: input.body.trim(),
       attachmentUrl: input.attachmentUrl?.trim() || null,
-      audience: input.audience ?? NoticeAudience.ALL,
+      audience,
       academicSessionId: input.academicSessionId ?? null,
       classSectionId: input.classSectionId ?? null,
       expiresAt: input.expiresAt ?? null,
     },
   });
+
+  await prisma.notification.create({
+    data: {
+      tenantId,
+      createdById,
+      title: input.title.trim(),
+      body: input.body.trim(),
+      type: NotificationType.ANNOUNCEMENT,
+      audience,
+      classSectionId: input.classSectionId ?? null,
+    },
+  });
+
+  try {
+    await dispatchPortalAudienceAlert(
+      tenantId,
+      {
+        category: "NOTICE",
+        title: notice.title,
+        body: notice.body,
+        type: NotificationType.ANNOUNCEMENT,
+        screen: "notices",
+        tenantName,
+        referenceId: notice.id,
+      },
+      {
+        audience,
+        classSectionId: input.classSectionId ?? null,
+      },
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "notice push failed";
+    console.error(`[notices] Push dispatch failed: ${message}`);
+  }
+
+  return notice;
 }
 
 export async function deleteNotice(tenantId: string, id: string) {

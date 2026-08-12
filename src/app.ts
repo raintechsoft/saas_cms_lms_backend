@@ -1,6 +1,8 @@
 import cors from "cors";
 import express, { type ErrorRequestHandler } from "express";
 import helmet from "helmet";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Prisma } from "@prisma/client";
 import { ZodError } from "zod";
 import { env } from "./config/env.js";
@@ -54,6 +56,12 @@ app.use(express.json({ limit: "40mb" }));
 if (getStorageDriver() === "local") {
   app.use("/uploads", express.static(UPLOAD_ROOT));
 }
+
+const pushImagesRoot = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../assets/push-images",
+);
+app.use("/api/v1/public/push-images", express.static(pushImagesRoot));
 
 app.use("/api/v1", apiRouter);
 

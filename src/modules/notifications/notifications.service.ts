@@ -9,8 +9,16 @@ import { env } from "../../config/env.js";
 import { prisma } from "../../lib/prisma.js";
 import { isPushConfigured, sendWebPush } from "../../lib/push.js";
 import { sendMail } from "../../lib/mail.js";
+import {
+  isMobilePushConfigured,
+  sendMobilePushToUser,
+  sendMobilePushToUsers,
+} from "../mobile/mobile-push.service.js";
+import { buildPortalPushPayload } from "../mobile/portal-alert.format.js";
+import { getTenantDisplayName } from "../mobile/portal-alert.service.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
 import { sendFeeRemindersForSession } from "./fee-reminders.js";
+import { collectAudienceUserIds } from "./push-audience.js";
 
 async function getUserRoleCodes(tenantId: string, userId: string) {
   const roles = await prisma.userRole.findMany({
@@ -31,6 +39,10 @@ type PushSubscriptionInput = {
   endpoint: string;
   keys: { p256dh: string; auth: string };
 };
+
+function isAnyPushConfigured() {
+  return isPushConfigured() || isMobilePushConfigured();
+}
 
 export async function savePushSubscription(
   tenantId: string,
@@ -70,22 +82,31 @@ export async function sendPushToUser(
     where: { tenantId, userId },
     select: { id: true, endpoint: true, p256dh: true, auth: true },
   });
-  if (!subscriptions.length) return { delivered: 0, failed: 0 };
 
   let delivered = 0;
   let failed = 0;
-  for (const sub of subscriptions) {
-    const result = await sendWebPush(sub, payload);
-    if (result.delivered) {
-      delivered += 1;
-      continue;
-    }
 
-    failed += 1;
-    if (result.statusCode === 404 || result.statusCode === 410) {
-      await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
+  if (isPushConfigured()) {
+    for (const sub of subscriptions) {
+      const result = await sendWebPush(sub, payload);
+      if (result.delivered) {
+        delivered += 1;
+        continue;
+      }
+
+      failed += 1;
+      if (result.statusCode === 404 || result.statusCode === 410) {
+        await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
+      }
     }
   }
+
+  const mobileResult = await sendMobilePushToUser(tenantId, userId, payload);
+  delivered += mobileResult.delivered;
+  failed += mobileResult.failed;
+
+  const totalRecipients = subscriptions.length + mobileResult.deviceCount;
+  if (!totalRecipients) return { delivered: 0, failed: 0 };
 
   try {
     const { logPushDelivery } = await import("../erp/push-gateway.service.js");
@@ -94,94 +115,15 @@ export async function sendPushToUser(
       title: payload.title,
       body: payload.body,
       topicKey: payload.type ?? null,
-      recipientCount: subscriptions.length,
+      recipientCount: totalRecipients,
       status: failed === 0 ? "DELIVERED" : delivered === 0 ? "FAILED" : "SENT",
-      errorMessage: failed > 0 ? `${failed} subscription(s) failed` : null,
+      errorMessage: failed > 0 ? `${failed} device(s) failed` : null,
     });
   } catch {
     // Non-blocking analytics logging
   }
 
   return { delivered, failed };
-}
-
-async function collectAudienceUserIds(
-  tenantId: string,
-  audience: NoticeAudience,
-  options?: { classSectionId?: string | null; targetUserId?: string | null },
-) {
-  if (options?.targetUserId) return [options.targetUserId];
-
-  const userIds = new Set<string>();
-
-  if (options?.classSectionId) {
-    const enrollments = await prisma.studentEnrollment.findMany({
-      where: tenantScope(tenantId, {
-        classSectionId: options.classSectionId,
-        status: EnrollmentStatus.ACTIVE,
-      }),
-      select: {
-        student: {
-          select: {
-            userId: true,
-            guardians: {
-              select: {
-                userId: true,
-                user: { select: { status: true } },
-              },
-            },
-          },
-        },
-      },
-    });
-
-    for (const row of enrollments) {
-      if (
-        (audience === NoticeAudience.STUDENTS || audience === NoticeAudience.ALL) &&
-        row.student.userId
-      ) {
-        userIds.add(row.student.userId);
-      }
-      if (audience === NoticeAudience.PARENTS || audience === NoticeAudience.ALL) {
-        for (const link of row.student.guardians) {
-          if (link.user.status === UserStatus.ACTIVE) userIds.add(link.userId);
-        }
-      }
-    }
-    return [...userIds];
-  }
-
-  if (audience === NoticeAudience.STUDENTS || audience === NoticeAudience.ALL) {
-    const studentUsers = await prisma.userRole.findMany({
-      where: tenantScope(tenantId, {
-        role: { code: "STUDENT" },
-        user: { status: UserStatus.ACTIVE },
-      }),
-      select: { userId: true },
-    });
-    for (const row of studentUsers) userIds.add(row.userId);
-  }
-
-  if (audience === NoticeAudience.PARENTS || audience === NoticeAudience.ALL) {
-    const parentUsers = await prisma.userRole.findMany({
-      where: tenantScope(tenantId, {
-        role: { code: "PARENT" },
-        user: { status: UserStatus.ACTIVE },
-      }),
-      select: { userId: true },
-    });
-    for (const row of parentUsers) userIds.add(row.userId);
-  }
-
-  if (audience === NoticeAudience.ALL) {
-    const users = await prisma.user.findMany({
-      where: tenantScope(tenantId, { status: UserStatus.ACTIVE }),
-      select: { id: true },
-    });
-    for (const row of users) userIds.add(row.id);
-  }
-
-  return [...userIds];
 }
 
 function pushClickUrlForAudience(audience: NoticeAudience) {
@@ -200,7 +142,7 @@ export async function sendPushToAudience(
   payload: { title: string; body: string; type?: string; url?: string },
   options?: { classSectionId?: string | null; targetUserId?: string | null },
 ) {
-  if (!isPushConfigured()) return { delivered: 0, failed: 0, recipients: 0 };
+  if (!isAnyPushConfigured()) return { delivered: 0, failed: 0, recipients: 0 };
 
   const userIds = await collectAudienceUserIds(tenantId, audience, options);
   if (!userIds.length) return { delivered: 0, failed: 0, recipients: 0 };
@@ -209,23 +151,35 @@ export async function sendPushToAudience(
     where: { tenantId, userId: { in: userIds } },
     select: { id: true, endpoint: true, p256dh: true, auth: true },
   });
-  if (!subscriptions.length) return { delivered: 0, failed: 0, recipients: userIds.length };
+
+  const resolvedPayload = {
+    ...payload,
+    url: payload.url ?? pushClickUrlForAudience(audience),
+  };
 
   let delivered = 0;
   let failed = 0;
-  for (const sub of subscriptions) {
-    const result = await sendWebPush(sub, {
-      ...payload,
-      url: payload.url ?? pushClickUrlForAudience(audience),
-    });
-    if (result.delivered) {
-      delivered += 1;
-      continue;
+
+  if (isPushConfigured()) {
+    for (const sub of subscriptions) {
+      const result = await sendWebPush(sub, resolvedPayload);
+      if (result.delivered) {
+        delivered += 1;
+        continue;
+      }
+      failed += 1;
+      if (result.statusCode === 404 || result.statusCode === 410) {
+        await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
+      }
     }
-    failed += 1;
-    if (result.statusCode === 404 || result.statusCode === 410) {
-      await prisma.pushSubscription.delete({ where: { id: sub.id } }).catch(() => undefined);
-    }
+  }
+
+  const mobileResult = await sendMobilePushToUsers(tenantId, userIds, resolvedPayload);
+  delivered += mobileResult.delivered;
+  failed += mobileResult.failed;
+
+  if (!subscriptions.length && mobileResult.deviceCount === 0) {
+    return { delivered: 0, failed: 0, recipients: userIds.length };
   }
 
   return { delivered, failed, recipients: userIds.length };
@@ -435,15 +389,23 @@ export async function createNotification(
 
   const audience = input.audience ?? NoticeAudience.ALL;
   let pushResult = { delivered: 0, failed: 0, recipients: 0 };
-  if (isPushConfigured()) {
+  if (isAnyPushConfigured()) {
     try {
+      const tenantName = await getTenantDisplayName(tenantId);
+      const pushPayload = buildPortalPushPayload({
+        category: "ANNOUNCEMENT",
+        title,
+        body,
+        type: notification.type,
+        screen: "notifications",
+        tenantName,
+        referenceId: notification.id,
+      });
       pushResult = await sendPushToAudience(
         tenantId,
         audience,
         {
-          title,
-          body,
-          type: notification.type,
+          ...pushPayload,
           url: pushClickUrlForAudience(audience),
         },
         {
@@ -556,10 +518,10 @@ export async function sendFeeOverdueReminders(
 }
 
 export async function sendPushTestNotification(tenantId: string, userId: string) {
-  if (!isPushConfigured()) {
+  if (!isAnyPushConfigured()) {
     throw new AppError(
       400,
-      "Push is not configured. Add PUSH_VAPID_PUBLIC_KEY, PUSH_VAPID_PRIVATE_KEY, PUSH_CONTACT_EMAIL.",
+      "Push is not configured. Add PUSH_VAPID_* env vars or FIREBASE_SERVICE_ACCOUNT_JSON.",
       "PUSH_NOT_CONFIGURED",
     );
   }

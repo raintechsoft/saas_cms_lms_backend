@@ -5,6 +5,7 @@ import { avatarUpload } from "../../lib/uploads.js";
 import {
   authConfigController,
   changePasswordController,
+  deleteAccountController,
   forgotPasswordController,
   googleLoginController,
   loginController,
@@ -31,6 +32,7 @@ authRouter.post("/auth/google", asyncHandler(googleLoginController));
 authRouter.get("/auth/me", authenticate, asyncHandler(meController));
 authRouter.put("/auth/profile", authenticate, asyncHandler(updateProfileController));
 authRouter.post("/auth/change-password", authenticate, asyncHandler(changePasswordController));
+authRouter.post("/auth/delete-account", authenticate, asyncHandler(deleteAccountController));
 authRouter.post(
   "/auth/profile/avatar",
   authenticate,

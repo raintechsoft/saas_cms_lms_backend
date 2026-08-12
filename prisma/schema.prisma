@@ -428,6 +428,7 @@ model Tenant {
   notices                Notice[]
   notifications          Notification[]
   pushSubscriptions      PushSubscription[]
+  mobilePushTokens       MobilePushToken[]
   websitePages           WebsitePage[]
   websiteMenus           WebsiteMenu[]
   websiteMedia           WebsiteMediaAsset[]
@@ -514,6 +515,7 @@ model User {
   sentNotifications        Notification[]               @relation("NotificationAuthor")
   targetedNotifications    Notification[]               @relation("NotificationTarget")
   pushSubscriptions        PushSubscription[]
+  mobilePushTokens         MobilePushToken[]
   academicBulkLogs         AcademicBulkUpdateLog[]      @relation("AcademicBulkActor")
   websitePagesUpdated      WebsitePage[]                @relation("WebsitePageUpdater")
   websiteMediaUploaded     WebsiteMediaAsset[]          @relation("WebsiteMediaUploader")
@@ -3524,6 +3526,22 @@ model PushSubscription {
   @@unique([tenantId, endpoint])
   @@index([tenantId, userId])
   @@map("push_subscriptions")
+}
+
+model MobilePushToken {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  userId    String   @map("user_id")
+  token     String
+  platform  String   @default("android")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, token])
+  @@index([tenantId, userId])
+  @@map("mobile_push_tokens")
 }
 
 enum WebsitePageStatus {

@@ -1,4 +1,6 @@
 import "dotenv/config";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 
 // Accept common MSG91 env aliases (Windows/.env casing variants).
@@ -48,6 +50,7 @@ const schema = z
     JWT_EXPIRES_IN: z.string().default("8h"),
     SETTINGS_ENCRYPTION_KEY: z.string().min(32).optional(),
     API_PORT: z.coerce.number().int().positive().default(4000),
+    API_PUBLIC_BASE_URL: z.string().url().optional(),
     WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
     SMTP_HOST: z.string().min(1).optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(587),
@@ -67,6 +70,8 @@ const schema = z
     PUSH_VAPID_PUBLIC_KEY: z.string().min(1).optional(),
     PUSH_VAPID_PRIVATE_KEY: z.string().min(1).optional(),
     PUSH_CONTACT_EMAIL: z.string().email().optional(),
+    FIREBASE_SERVICE_ACCOUNT_JSON: z.string().min(1).optional(),
+    FIREBASE_SERVICE_ACCOUNT_PATH: z.string().min(1).optional(),
     GOOGLE_CLIENT_ID: z.string().min(1).optional(),
     STORAGE_DRIVER: z.enum(["local", "s3"]).default("local"),
     S3_BUCKET: z.string().min(1).optional(),
@@ -201,4 +206,24 @@ export function isMsg91OtpWidgetConfigured() {
 
 export function isPushEnvConfigured() {
   return Boolean(env.PUSH_VAPID_PUBLIC_KEY && env.PUSH_VAPID_PRIVATE_KEY && env.PUSH_CONTACT_EMAIL);
+}
+
+export function isFcmEnvConfigured() {
+  return Boolean(env.FIREBASE_SERVICE_ACCOUNT_JSON || env.FIREBASE_SERVICE_ACCOUNT_PATH);
+}
+
+export function loadFirebaseServiceAccountJson(): string | null {
+  if (env.FIREBASE_SERVICE_ACCOUNT_PATH) {
+    try {
+      const filePath = path.isAbsolute(env.FIREBASE_SERVICE_ACCOUNT_PATH)
+        ? env.FIREBASE_SERVICE_ACCOUNT_PATH
+        : path.resolve(process.cwd(), env.FIREBASE_SERVICE_ACCOUNT_PATH);
+      return readFileSync(filePath, "utf8");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "read failed";
+      console.error(`[fcm] Failed to read FIREBASE_SERVICE_ACCOUNT_PATH: ${message}`);
+      return null;
+    }
+  }
+  return env.FIREBASE_SERVICE_ACCOUNT_JSON ?? null;
 }

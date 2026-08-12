@@ -704,3 +704,47 @@ export async function updateOwnAvatar(userId: string, avatarUrl: string) {
   });
   return user;
 }
+
+const PORTAL_SELF_DELETE_ROLES = new Set(["STUDENT", "PARENT"]);
+
+export async function deleteOwnAccount(userId: string, input: { password: string }) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    include: {
+      roles: { include: { role: { select: { code: true } } } },
+    },
+  });
+  if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
+  if (user.status !== UserStatus.ACTIVE) {
+    throw new AppError(400, "Account is already inactive", "ACCOUNT_INACTIVE");
+  }
+
+  const roleCodes = user.roles.map(({ role }) => role.code);
+  const isPortalUser =
+    roleCodes.length > 0 && roleCodes.every((code) => PORTAL_SELF_DELETE_ROLES.has(code));
+  if (!isPortalUser) {
+    throw new AppError(
+      403,
+      "This account cannot be deleted from the mobile app",
+      "DELETE_NOT_ALLOWED",
+    );
+  }
+
+  if (!user.passwordHash || !(await bcrypt.compare(input.password, user.passwordHash))) {
+    throw new AppError(400, "Password is incorrect", "INVALID_PASSWORD");
+  }
+
+  await prisma.$transaction([
+    prisma.mobilePushToken.deleteMany({ where: { userId } }),
+    prisma.pushSubscription.deleteMany({ where: { userId } }),
+    prisma.user.update({
+      where: { id: userId },
+      data: { status: UserStatus.DISABLED },
+    }),
+  ]);
+
+  return {
+    message:
+      "Your account has been deactivated. Contact your school office if you need access restored.",
+  };
+}

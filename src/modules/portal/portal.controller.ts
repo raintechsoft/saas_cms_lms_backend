@@ -12,6 +12,7 @@ import {
   getPortalChildHomework,
   getPortalChildLeaves,
   getPortalChildTimetable,
+  getPortalGeneratedDocument,
   listPortalNotices,
   listPortalTeachers,
   submitPortalHomework,
@@ -170,6 +171,24 @@ export async function getPortalDocumentsController(req: Request, res: Response) 
       viewer(req),
       req.auth!.productMode,
       studentId,
+    ),
+  });
+}
+
+export async function getPortalGeneratedDocumentController(req: Request, res: Response) {
+  const params = z
+    .object({
+      studentId: z.string().min(1),
+      documentId: z.string().min(1),
+    })
+    .parse(req.params);
+  res.json({
+    data: await getPortalGeneratedDocument(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      params.studentId,
+      params.documentId,
     ),
   });
 }

@@ -20,6 +20,54 @@ function stripQuestion<T extends { correctOption?: number | null }>(question: T)
   return safe;
 }
 
+function examVisibleToStudent(
+  exam: {
+    status: OnlineExamStatus;
+    isActive: boolean;
+    academicSessionId: string | null;
+    classSectionId: string | null;
+  },
+  enrollment: { academicSessionId: string; classSectionId: string } | null,
+) {
+  if (!exam.isActive || exam.status !== OnlineExamStatus.PUBLISHED) return false;
+  if (!enrollment) {
+    return !exam.academicSessionId && !exam.classSectionId;
+  }
+  if (
+    exam.academicSessionId &&
+    exam.academicSessionId !== enrollment.academicSessionId
+  ) {
+    return false;
+  }
+  if (exam.classSectionId && exam.classSectionId !== enrollment.classSectionId) {
+    return false;
+  }
+  return true;
+}
+
+function examOpenNow(exam: { startsAt: Date | null; endsAt: Date | null }) {
+  const now = new Date();
+  if (exam.startsAt && exam.startsAt > now) return false;
+  if (exam.endsAt && exam.endsAt < now) return false;
+  return true;
+}
+
+function examAvailabilityNote(
+  exam: { startsAt: Date | null; endsAt: Date | null },
+  enrollment: { academicSessionId: string; classSectionId: string } | null,
+  questionCount: number,
+) {
+  if (!enrollment) return "No active class enrollment linked to this student";
+  if (questionCount <= 0) return "School has not added questions yet";
+  const now = new Date();
+  if (exam.startsAt && exam.startsAt > now) {
+    return `Starts ${exam.startsAt.toISOString()}`;
+  }
+  if (exam.endsAt && exam.endsAt < now) return "Exam window has ended";
+  return null;
+}
+
+/** @deprecated use examVisibleToStudent + examOpenNow */
 function examAvailableToStudent(
   exam: {
     status: OnlineExamStatus;
@@ -31,21 +79,7 @@ function examAvailableToStudent(
   },
   enrollment: { academicSessionId: string; classSectionId: string } | null,
 ) {
-  if (!exam.isActive || exam.status !== OnlineExamStatus.PUBLISHED) return false;
-  const now = new Date();
-  if (exam.startsAt && exam.startsAt > now) return false;
-  if (exam.endsAt && exam.endsAt < now) return false;
-  if (
-    exam.academicSessionId &&
-    enrollment &&
-    exam.academicSessionId !== enrollment.academicSessionId
-  ) {
-    return false;
-  }
-  if (exam.classSectionId && enrollment && exam.classSectionId !== enrollment.classSectionId) {
-    return false;
-  }
-  return true;
+  return examVisibleToStudent(exam, enrollment) && examOpenNow(exam);
 }
 
 /** Results (score / pass / rank) are hidden until staff finishes grading. */
@@ -60,7 +94,13 @@ function maskAttemptResult<T extends {
   rank?: number | null;
   passed?: boolean | null;
 }>(row: T) {
-  if (isResultReleased(row.status)) return row;
+  if (isResultReleased(row.status)) {
+    return {
+      ...row,
+      score: row.score != null ? Number(row.score) : null,
+      maxScore: row.maxScore != null ? Number(row.maxScore) : null,
+    };
+  }
   return {
     ...row,
     score: null,
@@ -107,29 +147,47 @@ export async function listPortalOnlineExams(
 
   return exams
     .filter((exam) =>
-      examAvailableToStudent(exam, enrollment
+      examVisibleToStudent(
+        exam,
+        enrollment
+          ? {
+              academicSessionId: enrollment.academicSessionId,
+              classSectionId: enrollment.classSectionId,
+            }
+          : null,
+      ),
+    )
+    .map((exam) => {
+      const openNow = examOpenNow(exam);
+      const questionCount = exam._count.questions;
+      const availabilityNote = examAvailabilityNote(exam, enrollment
         ? {
             academicSessionId: enrollment.academicSessionId,
             classSectionId: enrollment.classSectionId,
           }
-        : null),
-    )
-    .map((exam) => ({
+        : null, questionCount);
+      const inProgressAttempt =
+        exam.attempts.find((a) => a.status === "IN_PROGRESS") ?? null;
+      const attemptsUsed = exam.attempts.length;
+      return {
       id: exam.id,
       title: exam.title,
       description: exam.description,
       durationMinutes: exam.durationMinutes,
       maxAttempts: exam.maxAttempts,
-      passMarks: exam.passMarks,
+      passMarks: Number(exam.passMarks),
       startsAt: exam.startsAt,
       endsAt: exam.endsAt,
-      questionCount: exam._count.questions,
-      attemptsUsed: exam.attempts.length,
-      attemptsRemaining: Math.max(0, exam.maxAttempts - exam.attempts.length),
+      questionCount,
+      isOpenNow: openNow,
+      availabilityNote,
+      attemptsUsed,
+      attemptsRemaining: Math.max(0, exam.maxAttempts - attemptsUsed),
       canAttempt:
+        questionCount > 0 &&
         portalRole(viewer) === "STUDENT" &&
-        exam.attempts.length < exam.maxAttempts &&
-        !exam.attempts.some((a) => a.status === "IN_PROGRESS"),
+        (inProgressAttempt != null ||
+          (openNow && attemptsUsed < exam.maxAttempts)),
       latestAttempt: exam.attempts[0]
         ? maskAttemptResult({
             id: exam.attempts[0].id,
@@ -141,9 +199,9 @@ export async function listPortalOnlineExams(
             submittedAt: exam.attempts[0].submittedAt,
           })
         : null,
-      inProgressAttempt:
-        exam.attempts.find((a) => a.status === "IN_PROGRESS") ?? null,
-    }));
+      inProgressAttempt,
+      };
+    });
 }
 
 export async function getPortalOnlineExamPaper(
@@ -168,14 +226,13 @@ export async function getPortalOnlineExamPaper(
     },
   });
   if (!exam) throw new AppError(404, "Online exam not found", "ONLINE_EXAM_NOT_FOUND");
-  if (
-    !examAvailableToStudent(exam, enrollment
-      ? {
-          academicSessionId: enrollment.academicSessionId,
-          classSectionId: enrollment.classSectionId,
-        }
-      : null)
-  ) {
+  const enrollmentCtx = enrollment
+    ? {
+        academicSessionId: enrollment.academicSessionId,
+        classSectionId: enrollment.classSectionId,
+      }
+    : null;
+  if (!examVisibleToStudent(exam, enrollmentCtx)) {
     throw new AppError(403, "Exam is not available", "EXAM_UNAVAILABLE");
   }
 
@@ -185,7 +242,7 @@ export async function getPortalOnlineExamPaper(
     description: exam.description,
     durationMinutes: exam.durationMinutes,
     maxAttempts: exam.maxAttempts,
-    passMarks: exam.passMarks,
+    passMarks: Number(exam.passMarks),
     startsAt: exam.startsAt,
     endsAt: exam.endsAt,
     attemptsUsed: exam.attempts.length,
@@ -215,8 +272,39 @@ export async function startPortalOnlineAttempt(
     throw new AppError(403, "Only the student can start this exam", "PORTAL_FORBIDDEN");
   }
 
-  // Validate availability (published + window + section)
-  await getPortalOnlineExamPaper(tenantId, viewer, productMode, studentId, examId);
+  const inProgress = await prisma.onlineExamAttempt.findFirst({
+    where: tenantScope(tenantId, {
+      examId,
+      studentId,
+      status: "IN_PROGRESS",
+    }),
+    select: { id: true },
+  });
+
+  // Validate availability (published + class/session). Skip date window when resuming.
+  if (!inProgress) {
+    await getPortalOnlineExamPaper(tenantId, viewer, productMode, studentId, examId);
+  } else {
+    const { student: linkedStudent } = await assertAccessibleStudent(tenantId, viewer, studentId);
+    const enrollment = currentEnrollment(linkedStudent);
+    const exam = await prisma.onlineExam.findFirst({
+      where: tenantScope(tenantId, { id: examId, isActive: true }),
+      select: {
+        status: true,
+        isActive: true,
+        academicSessionId: true,
+        classSectionId: true,
+      },
+    });
+    if (!exam || !examVisibleToStudent(exam, enrollment
+      ? {
+          academicSessionId: enrollment.academicSessionId,
+          classSectionId: enrollment.classSectionId,
+        }
+      : null)) {
+      throw new AppError(403, "Exam is not available", "EXAM_UNAVAILABLE");
+    }
+  }
 
   const attempt = await startOnlineAttempt(
     tenantId,
@@ -238,7 +326,7 @@ export async function startPortalOnlineAttempt(
       attemptNo: attempt.attemptNo,
       status: attempt.status,
       startedAt: attempt.startedAt,
-      maxScore: attempt.maxScore,
+      maxScore: attempt.maxScore != null ? Number(attempt.maxScore) : null,
       examId: attempt.examId,
     },
     paper,
@@ -270,8 +358,8 @@ export async function submitPortalOnlineAttempt(
   return {
     id: result.id,
     status: result.status,
-    score: released ? result.score : null,
-    maxScore: released ? result.maxScore : null,
+    score: released && result.score != null ? Number(result.score) : null,
+    maxScore: released && result.maxScore != null ? Number(result.maxScore) : null,
     rank: released ? result.rank : null,
     submittedAt: result.submittedAt,
     resultPending: !released,
