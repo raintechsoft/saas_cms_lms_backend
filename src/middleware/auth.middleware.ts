@@ -6,6 +6,7 @@ import {
   type ModuleEntitlement,
 } from "../modules/tenants/tenant.service.js";
 import { prisma } from "../lib/prisma.js";
+import { isManualEnableModuleKey } from "../lib/module-keys.js";
 
 export const authenticate = asyncHandler(async (req, _res, next) => {
   const [scheme, token] = req.headers.authorization?.split(" ") ?? [];
@@ -76,7 +77,14 @@ export function requireModule(moduleKey: string) {
     const setting = await prisma.tenantModuleSetting.findUnique({
       where: { tenantId_moduleKey: { tenantId, moduleKey } },
     });
-    if (!setting) return next();
+    // Unlicensed / manual modules: missing row means OFF (never implied on).
+    // Legacy modules: missing row means ON (pre-toggle tenants).
+    if (!setting) {
+      if (isManualEnableModuleKey(moduleKey)) {
+        throw new AppError(403, "This module is disabled for the current panel", "MODULE_DISABLED");
+      }
+      return next();
+    }
     const enabled = req.auth!.roles.includes("STUDENT")
       ? setting.studentEnabled
       : req.auth!.roles.includes("PARENT")

@@ -606,6 +606,12 @@ import {
   listTransportRoutesController,
   updateTransportRouteController,
 } from "../../modules/transport/transport.controller.js";
+import { questionBankRouter } from "../../modules/questionBank/questionBank.routes.js";
+import { testSeriesRouter } from "../../modules/testSeries/testSeries.routes.js";
+import { lessonPlanningRouter } from "../../modules/lessonPlanning/lessonPlanning.routes.js";
+import { liveClassesRouter } from "../../modules/liveClasses/liveClasses.routes.js";
+import { ncertContentRouter } from "../../modules/ncertContent/ncertContent.routes.js";
+import { academicCalendarRouter } from "../../modules/academicCalendar/academicCalendar.routes.js";
 
 const campusRouter = Router();
 campusRouter.use(authenticate, requireTenant);
@@ -630,6 +636,53 @@ campusRouter.use("/hostel", requireEntitlement("CMS"), requireModule("hostel"));
 campusRouter.use("/library", requireEntitlement("CMS"), requireModule("library"));
 campusRouter.use("/inventory", requireEntitlement("CMS"), requireModule("inventory"));
 campusRouter.use("/online-exams", requireEntitlement("CMS"), requireModule("onlineExam"));
+campusRouter.use(
+  "/question-bank",
+  requireEntitlement("LMS"),
+  requireModule("questionBank"),
+  requireAnyPermission("question_bank.view", "online_exam.view", "online_exam.manage"),
+  questionBankRouter,
+);
+campusRouter.use(
+  "/test-series",
+  requireEntitlement("LMS"),
+  requireModule("testSeries"),
+  requireAnyPermission(
+    "test_series.view",
+    "test_series.manage",
+    "online_exam.view",
+    "online_exam.manage",
+  ),
+  testSeriesRouter,
+);
+campusRouter.use(
+  "/lesson-planning",
+  requireEntitlement("LMS"),
+  requireModule("lessonPlanning"),
+  requireAnyPermission("lesson_planning.view", "lesson_planning.manage", "academics.view"),
+  lessonPlanningRouter,
+);
+campusRouter.use(
+  "/live-classes",
+  requireEntitlement("LMS"),
+  requireModule("liveClasses"),
+  requireAnyPermission("live_classes.view", "live_classes.manage", "timetable.view"),
+  liveClassesRouter,
+);
+campusRouter.use(
+  "/ncert-content",
+  requireEntitlement("LMS"),
+  requireModule("ncertLibrary"),
+  requireAnyPermission("ncert.view", "ncert.manage", "academics.view"),
+  ncertContentRouter,
+);
+campusRouter.use(
+  "/academic-calendar",
+  requireEntitlement("LMS"),
+  requireModule("academicCalendar"),
+  requireAnyPermission("academic_calendar.view", "academic_calendar.manage"),
+  academicCalendarRouter,
+);
 
 campusRouter.get(
   "/settings",

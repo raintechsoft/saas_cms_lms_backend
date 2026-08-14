@@ -12,6 +12,9 @@ import { getGeneratedDocument } from "../documents/documents.service.js";
 import { listStudentFees } from "../fees/fees.service.js";
 import { addTeacherRating } from "../hr/hr.service.js";
 import { submitHomework } from "../homework/homework.service.js";
+import { listPortalLiveClasses } from "../liveClasses/liveClasses.service.js";
+import { listPortalNcertResources, getPortalNcertResourceById } from "../ncertContent/ncertContent.service.js";
+import { listPortalAcademicEvents } from "../academicCalendar/academicCalendar.service.js";
 import {
   assertAccessibleStudent,
   assertProductMode,
@@ -290,6 +293,74 @@ export async function getPortalChildTimetable(
       ? `${entry.teacher.firstName} ${entry.teacher.lastName}`
       : null,
   }));
+}
+
+export async function getPortalChildLiveClasses(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+) {
+  assertProductMode(productMode, "LMS");
+  const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
+  const enrollment = currentEnrollment(student);
+  if (!enrollment) return [];
+  return listPortalLiveClasses(tenantId, {
+    classId: enrollment.classSection.classId,
+    classSectionId: enrollment.classSectionId,
+  });
+}
+
+export async function getPortalChildNcertResources(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+) {
+  assertProductMode(productMode, "LMS");
+  const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
+  const enrollment = currentEnrollment(student);
+  if (!enrollment) return [];
+  return listPortalNcertResources(tenantId, {
+    classId: enrollment.classSection.classId,
+  });
+}
+
+export async function getPortalChildNcertResource(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+  resourceId: string,
+) {
+  assertProductMode(productMode, "LMS");
+  const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
+  const enrollment = currentEnrollment(student);
+  if (!enrollment) {
+    throw new AppError(404, "NCERT resource not found", "NCERT_RESOURCE_NOT_FOUND");
+  }
+  return getPortalNcertResourceById(tenantId, {
+    classId: enrollment.classSection.classId,
+    id: resourceId,
+  });
+}
+
+export async function getPortalChildAcademicCalendar(
+  tenantId: string,
+  viewer: PortalViewer,
+  productMode: ProductMode | null,
+  studentId: string,
+  opts: { from?: string; to?: string } = {},
+) {
+  assertProductMode(productMode, "LMS");
+  const { student } = await assertAccessibleStudent(tenantId, viewer, studentId);
+  const enrollment = currentEnrollment(student);
+  if (!enrollment) return [];
+  return listPortalAcademicEvents(tenantId, {
+    classId: enrollment.classSection.classId,
+    from: opts.from,
+    to: opts.to,
+  });
 }
 
 export async function getPortalChildHomework(

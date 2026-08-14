@@ -152,9 +152,13 @@ export async function getTenantDetail(id: string) {
 
   const moduleSettings = await prisma.tenantModuleSetting.findMany({ where: { tenantId: id } });
   const settingByKey = new Map(moduleSettings.map((setting) => [setting.moduleKey, setting]));
-  // A module without a row is treated as enabled everywhere (legacy tenants).
+  // Missing row = enabled for legacy modules; manual/unlicensed keys require an explicit on-row.
+  const manualKeys = new Set<string>(MANUAL_ENABLE_MODULE_KEYS);
   const enabledModules = TENANT_MODULE_KEYS.filter((key) => {
     const setting = settingByKey.get(key);
+    if (manualKeys.has(key)) {
+      return Boolean(setting && (setting.adminEnabled || setting.studentEnabled || setting.parentEnabled));
+    }
     return !setting || setting.adminEnabled || setting.studentEnabled || setting.parentEnabled;
   });
 
@@ -200,26 +204,18 @@ export async function getTenantDetail(id: string) {
   };
 }
 
+import {
+  MANUAL_ENABLE_MODULE_KEYS,
+  TENANT_MODULE_KEYS,
+  isManualEnableModuleKey,
+} from "../../lib/module-keys.js";
+
 /** Module keys the super admin can toggle per tenant. Must match the campus nav + requireModule keys. */
-export const TENANT_MODULE_KEYS = [
-  "students",
-  "academics",
-  "attendance",
-  "notices",
-  "examinations",
-  "homework",
-  "fees",
-  "hr",
-  "documents",
-  "erp",
-  "timetable",
-  "reports",
-  "transport",
-  "hostel",
-  "library",
-  "inventory",
-  "onlineExam",
-] as const;
+export {
+  MANUAL_ENABLE_MODULE_KEYS,
+  TENANT_MODULE_KEYS,
+  isManualEnableModuleKey,
+};
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
