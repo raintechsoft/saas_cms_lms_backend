@@ -1,6 +1,10 @@
 import {
   EnrollmentStatus,
   ExamStatus,
+  InventoryMovementType,
+  LibraryLoanStatus,
+  OnlineAttemptStatus,
+  OnlineQuestionType,
   StaffStatus,
   StudentStatus,
 } from "@prisma/client";
@@ -536,9 +540,9 @@ export async function runExtendedReport(
     const now = new Date();
     const loans = await prisma.libraryLoan.findMany({
       where: tenantScope(tenantId, {
-        ...(reportKey === "book_issue" ? { status: "ISSUED" } : {}),
-        ...(reportKey === "book_due" ? { status: "ISSUED", dueAt: { lt: now } } : {}),
-        ...(reportKey === "book_return" ? { status: "RETURNED" } : {}),
+        ...(reportKey === "book_issue" ? { status: LibraryLoanStatus.ISSUED } : {}),
+        ...(reportKey === "book_due" ? { status: LibraryLoanStatus.ISSUED, dueAt: { lt: now } } : {}),
+        ...(reportKey === "book_return" ? { status: LibraryLoanStatus.RETURNED } : {}),
         ...(query.from || query.to
           ? {
               issuedAt: {
@@ -641,7 +645,7 @@ export async function runExtendedReport(
   }
 
   if (reportKey === "add_item" || reportKey === "issue_item") {
-    const type = reportKey === "add_item" ? "ADD" : "ISSUE";
+    const type = reportKey === "add_item" ? InventoryMovementType.ADD : InventoryMovementType.ISSUE;
     const movements = await prisma.inventoryMovement.findMany({
       where: tenantScope(tenantId, {
         type,
@@ -823,7 +827,7 @@ export async function runExtendedReport(
   if (reportKey === "online_rank") {
     const attempts = await prisma.onlineExamAttempt.findMany({
       where: tenantScope(tenantId, {
-        status: { in: ["SUBMITTED", "GRADED"] },
+        status: { in: [OnlineAttemptStatus.SUBMITTED, OnlineAttemptStatus.GRADED] },
         score: { not: null },
       }),
       include: {
@@ -857,7 +861,7 @@ export async function runExtendedReport(
   if (reportKey === "subjective_marks") {
     const answers = await prisma.onlineExamAnswer.findMany({
       where: tenantScope(tenantId, {
-        question: { type: "SUBJECTIVE" },
+        question: { type: OnlineQuestionType.SUBJECTIVE },
       }),
       include: {
         question: { select: { prompt: true, marks: true, sortOrder: true } },

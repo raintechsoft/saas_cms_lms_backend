@@ -332,6 +332,9 @@ export async function updateOnlineQuestion(
   let correctOption: number | null | undefined;
 
   if (type === OnlineQuestionType.MCQ) {
+    if (input.options === null) {
+      throw new AppError(400, "MCQ needs at least 2 options", "INVALID_MCQ_OPTIONS");
+    }
     const nextOptions =
       input.options !== undefined
         ? input.options.map((o) => o.trim()).filter(Boolean)

@@ -151,10 +151,10 @@ export async function listLibraryBooks(
       ...(q
         ? {
             OR: [
-              { title: { contains: q, mode: "insensitive" } },
-              { author: { contains: q, mode: "insensitive" } },
-              { isbn: { contains: q, mode: "insensitive" } },
-              { accessionNo: { contains: q, mode: "insensitive" } },
+              { title: { contains: q, mode: Prisma.QueryMode.insensitive } },
+              { author: { contains: q, mode: Prisma.QueryMode.insensitive } },
+              { isbn: { contains: q, mode: Prisma.QueryMode.insensitive } },
+              { accessionNo: { contains: q, mode: Prisma.QueryMode.insensitive } },
             ],
           }
         : {}),

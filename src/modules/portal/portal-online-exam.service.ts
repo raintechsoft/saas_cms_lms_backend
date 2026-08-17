@@ -1,4 +1,4 @@
-import { OnlineExamStatus, ProductMode } from "@prisma/client";
+import { OnlineAttemptStatus, OnlineExamStatus, ProductMode } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
@@ -276,7 +276,7 @@ export async function startPortalOnlineAttempt(
     where: tenantScope(tenantId, {
       examId,
       studentId,
-      status: "IN_PROGRESS",
+      status: OnlineAttemptStatus.IN_PROGRESS,
     }),
     select: { id: true },
   });

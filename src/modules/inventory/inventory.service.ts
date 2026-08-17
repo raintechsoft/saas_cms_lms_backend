@@ -1,4 +1,4 @@
-import { InventoryMovementType } from "@prisma/client";
+import { InventoryMovementType, Prisma } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { tenantScope } from "../../lib/tenant-scope.js";
@@ -111,9 +111,9 @@ export async function listInventoryItems(
       ...(q
         ? {
             OR: [
-              { name: { contains: q, mode: "insensitive" } },
-              { sku: { contains: q, mode: "insensitive" } },
-              { location: { contains: q, mode: "insensitive" } },
+              { name: { contains: q, mode: Prisma.QueryMode.insensitive } },
+              { sku: { contains: q, mode: Prisma.QueryMode.insensitive } },
+              { location: { contains: q, mode: Prisma.QueryMode.insensitive } },
             ],
           }
         : {}),
