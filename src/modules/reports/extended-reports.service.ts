@@ -1,6 +1,10 @@
 import {
   EnrollmentStatus,
   ExamStatus,
+  InventoryMovementType,
+  OnlineAttemptStatus,
+  OnlineQuestionType,
+  Prisma,
   StaffStatus,
   StudentStatus,
 } from "@prisma/client";
@@ -534,20 +538,21 @@ export async function runExtendedReport(
     reportKey === "book_return"
   ) {
     const now = new Date();
+    const loanWhere: Prisma.LibraryLoanWhereInput = tenantScope(tenantId, {
+      ...(reportKey === "book_issue" ? { status: "ISSUED" } : {}),
+      ...(reportKey === "book_due" ? { status: "ISSUED", dueAt: { lt: now } } : {}),
+      ...(reportKey === "book_return" ? { status: "RETURNED" } : {}),
+      ...(query.from || query.to
+        ? {
+            issuedAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(query.to ? { lte: new Date(query.to) } : {}),
+            },
+          }
+        : {}),
+    });
     const loans = await prisma.libraryLoan.findMany({
-      where: tenantScope(tenantId, {
-        ...(reportKey === "book_issue" ? { status: "ISSUED" } : {}),
-        ...(reportKey === "book_due" ? { status: "ISSUED", dueAt: { lt: now } } : {}),
-        ...(reportKey === "book_return" ? { status: "RETURNED" } : {}),
-        ...(query.from || query.to
-          ? {
-              issuedAt: {
-                ...(query.from ? { gte: new Date(query.from) } : {}),
-                ...(query.to ? { lte: new Date(query.to) } : {}),
-              },
-            }
-          : {}),
-      }),
+      where: loanWhere,
       include: {
         book: { select: { title: true, author: true, accessionNo: true, isbn: true } },
         student: {
@@ -641,19 +646,23 @@ export async function runExtendedReport(
   }
 
   if (reportKey === "add_item" || reportKey === "issue_item") {
-    const type = reportKey === "add_item" ? "ADD" : "ISSUE";
+    const type =
+      reportKey === "add_item"
+        ? InventoryMovementType.ADD
+        : InventoryMovementType.ISSUE;
+    const movementWhere: Prisma.InventoryMovementWhereInput = tenantScope(tenantId, {
+      type,
+      ...(query.from || query.to
+        ? {
+            createdAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(query.to ? { lte: new Date(query.to) } : {}),
+            },
+          }
+        : {}),
+    });
     const movements = await prisma.inventoryMovement.findMany({
-      where: tenantScope(tenantId, {
-        type,
-        ...(query.from || query.to
-          ? {
-              createdAt: {
-                ...(query.from ? { gte: new Date(query.from) } : {}),
-                ...(query.to ? { lte: new Date(query.to) } : {}),
-              },
-            }
-          : {}),
-      }),
+      where: movementWhere,
       include: {
         item: { select: { name: true, sku: true, unit: true } },
         student: {
@@ -776,17 +785,18 @@ export async function runExtendedReport(
   }
 
   if (reportKey === "online_attempt") {
+    const attemptWhere: Prisma.OnlineExamAttemptWhereInput = tenantScope(tenantId, {
+      ...(query.from || query.to
+        ? {
+            startedAt: {
+              ...(query.from ? { gte: new Date(query.from) } : {}),
+              ...(query.to ? { lte: new Date(query.to) } : {}),
+            },
+          }
+        : {}),
+    });
     const attempts = await prisma.onlineExamAttempt.findMany({
-      where: tenantScope(tenantId, {
-        ...(query.from || query.to
-          ? {
-              startedAt: {
-                ...(query.from ? { gte: new Date(query.from) } : {}),
-                ...(query.to ? { lte: new Date(query.to) } : {}),
-              },
-            }
-          : {}),
-      }),
+      where: attemptWhere,
       include: {
         exam: { select: { title: true, passMarks: true } },
         student: {
@@ -821,11 +831,14 @@ export async function runExtendedReport(
   }
 
   if (reportKey === "online_rank") {
+    const rankAttemptWhere: Prisma.OnlineExamAttemptWhereInput = tenantScope(tenantId, {
+      status: {
+        in: [OnlineAttemptStatus.SUBMITTED, OnlineAttemptStatus.GRADED],
+      },
+      score: { not: null },
+    });
     const attempts = await prisma.onlineExamAttempt.findMany({
-      where: tenantScope(tenantId, {
-        status: { in: ["SUBMITTED", "GRADED"] },
-        score: { not: null },
-      }),
+      where: rankAttemptWhere,
       include: {
         exam: { select: { title: true, passMarks: true } },
         student: {
@@ -855,10 +868,11 @@ export async function runExtendedReport(
   }
 
   if (reportKey === "subjective_marks") {
+    const answerWhere: Prisma.OnlineExamAnswerWhereInput = tenantScope(tenantId, {
+      question: { type: OnlineQuestionType.SUBJECTIVE },
+    });
     const answers = await prisma.onlineExamAnswer.findMany({
-      where: tenantScope(tenantId, {
-        question: { type: "SUBJECTIVE" },
-      }),
+      where: answerWhere,
       include: {
         question: { select: { prompt: true, marks: true, sortOrder: true } },
         attempt: {
