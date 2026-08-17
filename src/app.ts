@@ -1,5 +1,4 @@
-import cors from "cors";
-import express, { type ErrorRequestHandler } from "express";
+import express, { type ErrorRequestHandler, type Request, type Response } from "express";
 import helmet from "helmet";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,15 +12,43 @@ import { apiRouter } from "./routes/index.js";
 
 export const app = express();
 
-const allowedOrigins = new Set(
-  [
-    ...env.WEB_ORIGIN.split(",").map((origin) => origin.trim().replace(/\/+$/, "")),
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:5174",
-    "http://127.0.0.1:5174",
-  ].filter(Boolean),
-);
+function parseOrigins(value: string): string[] {
+  return value
+    .split(/[\s,]+/)
+    .map((origin) => origin.trim().replace(/^["']|["']$/g, "").replace(/\/+$/, ""))
+    .filter(Boolean);
+}
+
+const allowedOrigins = new Set([
+  ...parseOrigins(env.WEB_ORIGIN),
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
+  "https://universe-ai-solution-saas.onrender.com",
+]);
+
+function normalizeOrigin(origin: string | undefined): string {
+  return (origin ?? "").trim().replace(/\/+$/, "");
+}
+
+function isAllowedOrigin(origin: string): boolean {
+  return allowedOrigins.has(origin) || env.NODE_ENV !== "production";
+}
+
+function applyCorsHeaders(req: Request, res: Response) {
+  const origin = normalizeOrigin(
+    typeof req.headers.origin === "string" ? req.headers.origin : undefined,
+  );
+  if (!origin || !isAllowedOrigin(origin)) return;
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
+  res.setHeader("Access-Control-Max-Age", "86400");
+}
+
+console.log(`[cors] allowed origins: ${[...allowedOrigins].join(", ")}`);
 
 app.disable("x-powered-by");
 app.use(
@@ -29,20 +56,14 @@ app.use(
     crossOriginResourcePolicy: { policy: "cross-origin" },
   }),
 );
-app.use(
-  cors({
-    origin(origin, callback) {
-      if (!origin || allowedOrigins.has(origin) || env.NODE_ENV !== "production") {
-        callback(null, true);
-        return;
-      }
-      callback(null, false);
-    },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: false,
-  }),
-);
+app.use((req, res, next) => {
+  applyCorsHeaders(req, res);
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
 app.post(
   "/api/v1/webhooks/razorpay",
   express.raw({ type: "application/json" }),
@@ -69,7 +90,8 @@ app.use((_req, res) => {
   res.status(404).json({ error: { code: "NOT_FOUND", message: "Route not found" } });
 });
 
-const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
+  applyCorsHeaders(req, res);
   if (error instanceof ZodError) {
     res.status(400).json({
       error: {
