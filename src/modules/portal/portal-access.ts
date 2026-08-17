@@ -74,7 +74,7 @@ export type AccessibleStudent = AccessibleLink["student"];
 
 export function currentEnrollment(student: AccessibleStudent) {
   return (
-    student.enrollments.find((item) => item.academicSession.isCurrent) ??
+    student.enrollments.find((item) => item.academicSession?.isCurrent) ??
     student.enrollments[0] ??
     null
   );
