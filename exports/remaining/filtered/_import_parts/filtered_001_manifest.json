@@ -1,0 +1,24 @@
+{
+  "file": "filtered_001.sql",
+  "statements": 143,
+  "parts": [
+    {
+      "label": "full",
+      "statements": 143,
+      "path": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\_import_parts\\filtered_001_full.sql",
+      "bytes": 69981
+    },
+    {
+      "label": "half1",
+      "statements": 71,
+      "path": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\_import_parts\\filtered_001_half1.sql",
+      "bytes": 44432
+    },
+    {
+      "label": "half2",
+      "statements": 72,
+      "path": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\_import_parts\\filtered_001_half2.sql",
+      "bytes": 25628
+    }
+  ]
+}

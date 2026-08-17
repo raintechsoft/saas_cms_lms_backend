@@ -1,0 +1,4 @@
+{
+  "len": 69895,
+  "preview": "SET session_replication_role = replica;\nINSERT INTO public.message_notice_templates (id, tenant_id, key, name, description, type, category, language, subject, body, channel_whatsapp, channel_sms, chan"
+}
