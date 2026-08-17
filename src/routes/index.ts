@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { prisma } from "../lib/prisma.js";
 import { authRouter } from "./auth/index.js";
 import { campusRouter } from "./campus/index.js";
 import { platformRouter } from "./super-admin/index.js";
@@ -10,6 +11,17 @@ export const apiRouter = Router();
 
 apiRouter.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "saas-cms-lms-api" });
+});
+
+apiRouter.get("/health/db", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: "ok", database: "connected" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "database query failed";
+    console.error("[health/db]", message);
+    res.status(503).json({ status: "error", database: "disconnected", message });
+  }
 });
 
 // Shared authentication endpoints.

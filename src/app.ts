@@ -15,7 +15,7 @@ export const app = express();
 
 const allowedOrigins = new Set(
   [
-    env.WEB_ORIGIN,
+    ...env.WEB_ORIGIN.split(",").map((origin) => origin.trim().replace(/\/+$/, "")),
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:5174",
@@ -36,7 +36,7 @@ app.use(
         callback(null, true);
         return;
       }
-      callback(new Error(`Origin ${origin} is not allowed by CORS`));
+      callback(null, false);
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -84,6 +84,23 @@ const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   if (error instanceof AppError) {
     res.status(error.statusCode).json({
       error: { code: error.code, message: error.message },
+    });
+    return;
+  }
+
+  if (
+    error instanceof Prisma.PrismaClientInitializationError ||
+    error instanceof Prisma.PrismaClientRustPanicError ||
+    (error instanceof Prisma.PrismaClientKnownRequestError &&
+      ["P1001", "P1002", "P1017", "P2021", "P2022"].includes(error.code))
+  ) {
+    console.error("[database]", error);
+    res.status(503).json({
+      error: {
+        code: "DATABASE_UNAVAILABLE",
+        message:
+          "API is running but cannot query the database. On Render, set DATABASE_URL to the Supabase pooler URI (not localhost, and not db.*.supabase.co:5432). Use sslmode=require.",
+      },
     });
     return;
   }

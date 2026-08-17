@@ -8,10 +8,30 @@ import { app } from "./app.js";
 
 await ensureLocalUploadDirs();
 
+{
+  try {
+    const dbUrl = new URL(env.DATABASE_URL);
+    console.log(`[database] host=${dbUrl.hostname} port=${dbUrl.port || "5432"}`);
+    if (/^db\.[a-z0-9]+\.supabase\.co$/i.test(dbUrl.hostname)) {
+      console.error(
+        "[database] Still using the direct Supabase host. Render cannot reach db.*.supabase.co:5432. Set DATABASE_URL to the pooler URI.",
+      );
+    }
+    if (/^localhost$|^127\.0\.0\.1$/.test(dbUrl.hostname)) {
+      console.warn(
+        "[database] DATABASE_URL points at localhost. Render cannot reach your PC Postgres — use the Supabase pooler URI.",
+      );
+    }
+  } catch {
+    console.warn("[database] DATABASE_URL is not a valid URI");
+  }
+}
+
 const REMINDER_TICK_MS = 60_000;
 
-const server = app.listen(env.API_PORT, () => {
-  console.log(`SaaS CMS LMS API listening on http://localhost:${env.API_PORT}`);
+const port = Number(process.env.PORT) || env.API_PORT;
+const server = app.listen(port, "0.0.0.0", () => {
+  console.log(`SaaS CMS LMS API listening on http://localhost:${port}`);
   console.log(
     isMailConfigured()
       ? "[mail] SMTP configured — OTP and password-reset emails will be delivered"

@@ -3,6 +3,59 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
+function rewriteSupabaseDatabaseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+
+  const directMatch = parsed.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+  if (directMatch) {
+    const projectRef = directMatch[1];
+    const region = process.env.SUPABASE_POOLER_REGION?.trim() || "ap-southeast-1";
+    parsed.hostname = `aws-0-${region}.pooler.supabase.com`;
+    parsed.port = "6543";
+    const user = decodeURIComponent(parsed.username || "postgres");
+    if (user === "postgres" || !user.includes(".")) {
+      parsed.username = `postgres.${projectRef}`;
+    }
+    parsed.searchParams.set("pgbouncer", "true");
+    parsed.searchParams.set("sslmode", "require");
+    if (!parsed.searchParams.has("connection_limit")) {
+      parsed.searchParams.set("connection_limit", "1");
+    }
+    const rewritten = parsed.toString();
+    console.warn(
+      `[database] Rewrote direct Supabase host db.${projectRef}.supabase.co:5432 → ${parsed.hostname}:6543`,
+    );
+    return rewritten;
+  }
+
+  if (/supabase\.(co|com)/i.test(trimmed)) {
+    if (!parsed.searchParams.has("sslmode")) parsed.searchParams.set("sslmode", "require");
+    if (
+      (parsed.port === "6543" || parsed.searchParams.get("pgbouncer") === "true") &&
+      !parsed.searchParams.has("connection_limit")
+    ) {
+      parsed.searchParams.set("connection_limit", "1");
+    }
+    return parsed.toString();
+  }
+
+  return trimmed;
+}
+
+{
+  if (process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = rewriteSupabaseDatabaseUrl(process.env.DATABASE_URL);
+  }
+}
+
 // Accept common MSG91 env aliases (Windows/.env casing variants).
 {
   const authKey =
@@ -51,7 +104,7 @@ const schema = z
     SETTINGS_ENCRYPTION_KEY: z.string().min(32).optional(),
     API_PORT: z.coerce.number().int().positive().default(4000),
     API_PUBLIC_BASE_URL: z.string().url().optional(),
-    WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+    WEB_ORIGIN: z.string().min(1).default("http://localhost:5173"),
     SMTP_HOST: z.string().min(1).optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(587),
     SMTP_SECURE: z
@@ -194,7 +247,10 @@ const schema = z
     }
   });
 
-export const env = schema.parse(process.env);
+export const env = schema.parse({
+  ...process.env,
+  WEB_ORIGIN: process.env.WEB_ORIGIN?.replace(/\/+$/, "") || "http://localhost:5173",
+});
 
 export function isMsg91EnvConfigured() {
   return Boolean(env.MSG91_AUTH_KEY && env.MSG91_SENDER_ID);
