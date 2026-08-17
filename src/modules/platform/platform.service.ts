@@ -137,7 +137,7 @@ export async function getTenantDetail(id: string) {
       users: {
         orderBy: { createdAt: "desc" },
         take: 50,
-        include: { roles: { include: { role: { select: { code: true } } } } },
+        include: { roles: { select: { roleId: true } } },
       },
     },
   });
@@ -186,14 +186,24 @@ export async function getTenantDetail(id: string) {
           onlineAdmission: tenant.setting.onlineAdmission,
         }
       : null,
-    recentUsers: tenant.users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      status: user.status,
-      roles: user.roles.map(({ role }) => role.code),
-    })),
+    recentUsers: await (async () => {
+      const roleIds = [...new Set(tenant.users.flatMap((user) => user.roles.map((link) => link.roleId)))];
+      const roles = roleIds.length
+        ? await prisma.role.findMany({ where: { id: { in: roleIds } }, select: { id: true, code: true } })
+        : [];
+      const codeById = new Map(roles.map((role) => [role.id, role.code]));
+      return tenant.users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        status: user.status,
+        roles: user.roles.flatMap((link) => {
+          const code = codeById.get(link.roleId);
+          return code ? [code] : [];
+        }),
+      }));
+    })(),
     activity: activity.map((log) => ({
       id: log.id,
       action: log.action,
@@ -452,6 +462,16 @@ export async function listPlatformUsers(query?: {
   status?: UserStatus;
   role?: string;
 }) {
+  let roleIdsForFilter: string[] | undefined;
+  if (query?.role) {
+    const matchingRoles = await prisma.role.findMany({
+      where: { code: query.role },
+      select: { id: true },
+    });
+    roleIdsForFilter = matchingRoles.map((role) => role.id);
+    if (roleIdsForFilter.length === 0) return [];
+  }
+
   const users = await prisma.user.findMany({
     where: {
       tenantId: query?.tenantId,
@@ -465,8 +485,8 @@ export async function listPlatformUsers(query?: {
             ],
           }
         : {}),
-      ...(query?.role
-        ? { roles: { some: { role: { code: query.role } } } }
+      ...(roleIdsForFilter
+        ? { roles: { some: { roleId: { in: roleIdsForFilter } } } }
         : {}),
     },
     orderBy: { createdAt: "desc" },
@@ -474,9 +494,33 @@ export async function listPlatformUsers(query?: {
     include: {
       tenant: { select: { id: true, name: true, slug: true } },
       reseller: { select: { id: true, name: true } },
-      roles: { include: { role: { select: { code: true, name: true } } } },
     },
   });
+
+  const userIds = users.map((user) => user.id);
+  const links = userIds.length
+    ? await prisma.userRole.findMany({
+        where: { userId: { in: userIds } },
+        select: { userId: true, roleId: true },
+      })
+    : [];
+  const roleIds = [...new Set(links.map((link) => link.roleId))];
+  const roles = roleIds.length
+    ? await prisma.role.findMany({
+        where: { id: { in: roleIds } },
+        select: { id: true, code: true },
+      })
+    : [];
+  const codeByRoleId = new Map(roles.map((role) => [role.id, role.code]));
+  const rolesByUser = new Map<string, string[]>();
+  for (const link of links) {
+    const code = codeByRoleId.get(link.roleId);
+    if (!code) continue;
+    const current = rolesByUser.get(link.userId) ?? [];
+    current.push(code);
+    rolesByUser.set(link.userId, current);
+  }
+
   return users.map((user) => ({
     id: user.id,
     email: user.email,
@@ -486,7 +530,7 @@ export async function listPlatformUsers(query?: {
     status: user.status,
     tenant: user.tenant,
     reseller: user.reseller,
-    roles: user.roles.map(({ role }) => role.code),
+    roles: rolesByUser.get(user.id) ?? [],
     createdAt: user.createdAt,
   }));
 }
