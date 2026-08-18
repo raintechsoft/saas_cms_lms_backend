@@ -315,9 +315,21 @@ export async function createTenant(input: CreateTenantInput) {
   }
 
   const productMode = normalizeProductMode(input.type, input.productMode);
+  const email = input.adminEmail.trim().toLowerCase();
+  const phone = normalizeSmsNumber(input.adminPhone);
+  if (!phone || phone.replace(/\D/g, "").length < 10) {
+    throw new AppError(400, "A valid mobile number is required for the institution admin", "ADMIN_PHONE_REQUIRED");
+  }
+  const password = input.adminPassword?.trim() || "ChangeMe123!";
+  const passwordHash = await bcrypt.hash(password, PASSWORD_ROUNDS);
 
-  return prisma.$transaction(async (tx) => {
-    const tenant = await tx.tenant.create({
+  // Do not use prisma.$transaction(async tx => …) here. Render talks to Supabase
+  // through PgBouncer transaction pooling, which cannot hold an interactive
+  // transaction across the many role/bootstrap writes — that is what 500'd
+  // POST /platform/tenants. Sequential writes + cascade delete on failure is safe.
+  let tenantId: string | undefined;
+  try {
+    const tenant = await prisma.tenant.create({
       data: {
         name: input.name.trim(),
         slug,
@@ -328,38 +340,52 @@ export async function createTenant(input: CreateTenantInput) {
         branding: asJson(input.branding),
       },
     });
+    tenantId = tenant.id;
 
-    await ensureTenantRoles(tenant.id, tx);
-    await bootstrapTenantWorkspace(tenant.id, tx);
+    await ensureTenantRoles(tenant.id);
+    await bootstrapTenantWorkspace(tenant.id);
     if (input.modules) {
-      await applyTenantModuleSelection(tenant.id, input.modules, tx);
+      await applyTenantModuleSelection(tenant.id, input.modules);
     }
 
-    let admin: { email: string; phone: string; temporaryPassword?: string } | null = null;
-    const email = input.adminEmail.trim().toLowerCase();
-    const phone = normalizeSmsNumber(input.adminPhone);
-    if (!phone || phone.replace(/\D/g, "").length < 10) {
-      throw new AppError(400, "A valid mobile number is required for the institution admin", "ADMIN_PHONE_REQUIRED");
-    }
-    const role = await ensureInstitutionAdminRole(tenant.id, tx);
-    const password = input.adminPassword?.trim() || "ChangeMe123!";
-    const user = await tx.user.create({
+    const role = await ensureInstitutionAdminRole(tenant.id);
+    const user = await prisma.user.create({
       data: {
         tenantId: tenant.id,
         email,
         phone,
-        passwordHash: await bcrypt.hash(password, PASSWORD_ROUNDS),
+        passwordHash,
         firstName: input.adminFirstName?.trim() || "Institution",
         lastName: input.adminLastName?.trim() || "Administrator",
       },
     });
-    await tx.userRole.create({
+    await prisma.userRole.create({
       data: { userId: user.id, roleId: role.id, tenantId: tenant.id },
     });
-    admin = { email, phone, temporaryPassword: input.adminPassword ? undefined : password };
 
-    return { tenant, admin };
-  });
+    return {
+      tenant,
+      admin: {
+        email,
+        phone,
+        temporaryPassword: input.adminPassword ? undefined : password,
+      },
+    };
+  } catch (error) {
+    if (tenantId) {
+      await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => undefined);
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target)
+        ? error.meta.target.join(".")
+        : String(error.meta?.target ?? "");
+      if (target.includes("slug")) {
+        throw new AppError(409, "A tenant with this slug already exists", "SLUG_TAKEN");
+      }
+      throw new AppError(409, "That admin email is already used for this workspace", "ADMIN_EMAIL_TAKEN");
+    }
+    throw error;
+  }
 }
 
 interface UpdateTenantInput {

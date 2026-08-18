@@ -26,8 +26,10 @@ function rewriteSupabaseDatabaseUrl(raw: string): string {
     }
     parsed.searchParams.set("pgbouncer", "true");
     parsed.searchParams.set("sslmode", "require");
-    if (!parsed.searchParams.has("connection_limit")) {
-      parsed.searchParams.set("connection_limit", "1");
+    // Interactive Prisma work (tenant create, etc.) needs more than one pooled
+    // connection. connection_limit=1 times out those requests with a 500.
+    if (!parsed.searchParams.has("connection_limit") || parsed.searchParams.get("connection_limit") === "1") {
+      parsed.searchParams.set("connection_limit", "5");
     }
     const rewritten = parsed.toString();
     console.warn(
@@ -38,11 +40,10 @@ function rewriteSupabaseDatabaseUrl(raw: string): string {
 
   if (/supabase\.(co|com)/i.test(trimmed)) {
     if (!parsed.searchParams.has("sslmode")) parsed.searchParams.set("sslmode", "require");
-    if (
-      (parsed.port === "6543" || parsed.searchParams.get("pgbouncer") === "true") &&
-      !parsed.searchParams.has("connection_limit")
-    ) {
-      parsed.searchParams.set("connection_limit", "1");
+    if (parsed.port === "6543" || parsed.searchParams.get("pgbouncer") === "true") {
+      if (!parsed.searchParams.has("connection_limit") || parsed.searchParams.get("connection_limit") === "1") {
+        parsed.searchParams.set("connection_limit", "5");
+      }
     }
     return parsed.toString();
   }
