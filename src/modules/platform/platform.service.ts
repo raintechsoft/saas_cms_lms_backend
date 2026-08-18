@@ -32,21 +32,20 @@ function slugify(value: string) {
 }
 
 export async function getPlatformStats() {
-  const [tenantsByStatus, tenantsByType, tenantsByMode, tenantTotal, userTotal, resellerTotal, studentTotal, recentTenants] =
-    await Promise.all([
-      prisma.tenant.groupBy({ by: ["status"], _count: true }),
-      prisma.tenant.groupBy({ by: ["type"], _count: true }),
-      prisma.tenant.groupBy({ by: ["productMode"], _count: true }),
-      prisma.tenant.count(),
-      prisma.user.count(),
-      prisma.reseller.count(),
-      prisma.student.count(),
-      prisma.tenant.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        include: { reseller: { select: { name: true } }, _count: { select: { users: true, students: true } } },
-      }),
-    ]);
+  // Sequential on purpose: a Prisma pool of 1 (old Render config) deadlocks
+  // eight parallel queries (P2024). Even with a larger pool this is cheap.
+  const tenantsByStatus = await prisma.tenant.groupBy({ by: ["status"], _count: true });
+  const tenantsByType = await prisma.tenant.groupBy({ by: ["type"], _count: true });
+  const tenantsByMode = await prisma.tenant.groupBy({ by: ["productMode"], _count: true });
+  const tenantTotal = await prisma.tenant.count();
+  const userTotal = await prisma.user.count();
+  const resellerTotal = await prisma.reseller.count();
+  const studentTotal = await prisma.student.count();
+  const recentTenants = await prisma.tenant.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 5,
+    include: { reseller: { select: { name: true } }, _count: { select: { users: true, students: true } } },
+  });
 
   const toMap = <T extends { _count: number }>(rows: T[], key: keyof T) =>
     rows.reduce<Record<string, number>>((acc, row) => {

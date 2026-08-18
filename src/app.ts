@@ -114,7 +114,7 @@ const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
     error instanceof Prisma.PrismaClientInitializationError ||
     error instanceof Prisma.PrismaClientRustPanicError ||
     (error instanceof Prisma.PrismaClientKnownRequestError &&
-      ["P1001", "P1002", "P1017", "P2021", "P2022", "P2028"].includes(error.code))
+      ["P1001", "P1002", "P1017", "P2021", "P2022", "P2024", "P2028"].includes(error.code))
   ) {
     console.error("[database]", error);
     res.status(503).json({

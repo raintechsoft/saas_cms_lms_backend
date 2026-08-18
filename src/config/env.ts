@@ -3,6 +3,24 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
+/** Prisma-side pool. Render + Supabase PgBouncer cannot serve parallel queries with connection_limit=1 (P2024). */
+function withPrismaPoolSettings(raw: string): string {
+  try {
+    const parsed = new URL(raw);
+    const limit = Number(parsed.searchParams.get("connection_limit") || "0");
+    if (!Number.isFinite(limit) || limit < 5) {
+      parsed.searchParams.set("connection_limit", "10");
+    }
+    const timeout = Number(parsed.searchParams.get("pool_timeout") || "0");
+    if (!Number.isFinite(timeout) || timeout < 20) {
+      parsed.searchParams.set("pool_timeout", "20");
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
 function rewriteSupabaseDatabaseUrl(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return trimmed;
@@ -26,12 +44,7 @@ function rewriteSupabaseDatabaseUrl(raw: string): string {
     }
     parsed.searchParams.set("pgbouncer", "true");
     parsed.searchParams.set("sslmode", "require");
-    // Interactive Prisma work (tenant create, etc.) needs more than one pooled
-    // connection. connection_limit=1 times out those requests with a 500.
-    if (!parsed.searchParams.has("connection_limit") || parsed.searchParams.get("connection_limit") === "1") {
-      parsed.searchParams.set("connection_limit", "5");
-    }
-    const rewritten = parsed.toString();
+    const rewritten = withPrismaPoolSettings(parsed.toString());
     console.warn(
       `[database] Rewrote direct Supabase host db.${projectRef}.supabase.co:5432 → ${parsed.hostname}:6543`,
     );
@@ -40,15 +53,10 @@ function rewriteSupabaseDatabaseUrl(raw: string): string {
 
   if (/supabase\.(co|com)/i.test(trimmed)) {
     if (!parsed.searchParams.has("sslmode")) parsed.searchParams.set("sslmode", "require");
-    if (parsed.port === "6543" || parsed.searchParams.get("pgbouncer") === "true") {
-      if (!parsed.searchParams.has("connection_limit") || parsed.searchParams.get("connection_limit") === "1") {
-        parsed.searchParams.set("connection_limit", "5");
-      }
-    }
-    return parsed.toString();
+    return withPrismaPoolSettings(parsed.toString());
   }
 
-  return trimmed;
+  return withPrismaPoolSettings(trimmed);
 }
 
 {
