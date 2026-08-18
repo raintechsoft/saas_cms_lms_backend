@@ -32,21 +32,20 @@ function slugify(value: string) {
 }
 
 export async function getPlatformStats() {
-  const [tenantsByStatus, tenantsByType, tenantsByMode, tenantTotal, userTotal, resellerTotal, studentTotal, recentTenants] =
-    await Promise.all([
-      prisma.tenant.groupBy({ by: ["status"], _count: true }),
-      prisma.tenant.groupBy({ by: ["type"], _count: true }),
-      prisma.tenant.groupBy({ by: ["productMode"], _count: true }),
-      prisma.tenant.count(),
-      prisma.user.count(),
-      prisma.reseller.count(),
-      prisma.student.count(),
-      prisma.tenant.findMany({
-        orderBy: { createdAt: "desc" },
-        take: 5,
-        include: { reseller: { select: { name: true } }, _count: { select: { users: true, students: true } } },
-      }),
-    ]);
+  // Sequential on purpose: a Prisma pool of 1 (old Render config) deadlocks
+  // eight parallel queries (P2024). Even with a larger pool this is cheap.
+  const tenantsByStatus = await prisma.tenant.groupBy({ by: ["status"], _count: true });
+  const tenantsByType = await prisma.tenant.groupBy({ by: ["type"], _count: true });
+  const tenantsByMode = await prisma.tenant.groupBy({ by: ["productMode"], _count: true });
+  const tenantTotal = await prisma.tenant.count();
+  const userTotal = await prisma.user.count();
+  const resellerTotal = await prisma.reseller.count();
+  const studentTotal = await prisma.student.count();
+  const recentTenants = await prisma.tenant.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 5,
+    include: { reseller: { select: { name: true } }, _count: { select: { users: true, students: true } } },
+  });
 
   const toMap = <T extends { _count: number }>(rows: T[], key: keyof T) =>
     rows.reduce<Record<string, number>>((acc, row) => {
@@ -137,7 +136,7 @@ export async function getTenantDetail(id: string) {
       users: {
         orderBy: { createdAt: "desc" },
         take: 50,
-        include: { roles: { include: { role: { select: { code: true } } } } },
+        include: { roles: { select: { roleId: true } } },
       },
     },
   });
@@ -152,9 +151,13 @@ export async function getTenantDetail(id: string) {
 
   const moduleSettings = await prisma.tenantModuleSetting.findMany({ where: { tenantId: id } });
   const settingByKey = new Map(moduleSettings.map((setting) => [setting.moduleKey, setting]));
-  // A module without a row is treated as enabled everywhere (legacy tenants).
+  // Missing row = enabled for legacy modules; manual/unlicensed keys require an explicit on-row.
+  const manualKeys = new Set<string>(MANUAL_ENABLE_MODULE_KEYS);
   const enabledModules = TENANT_MODULE_KEYS.filter((key) => {
     const setting = settingByKey.get(key);
+    if (manualKeys.has(key)) {
+      return Boolean(setting && (setting.adminEnabled || setting.studentEnabled || setting.parentEnabled));
+    }
     return !setting || setting.adminEnabled || setting.studentEnabled || setting.parentEnabled;
   });
 
@@ -182,14 +185,24 @@ export async function getTenantDetail(id: string) {
           onlineAdmission: tenant.setting.onlineAdmission,
         }
       : null,
-    recentUsers: tenant.users.map((user) => ({
-      id: user.id,
-      email: user.email,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      status: user.status,
-      roles: user.roles.map(({ role }) => role.code),
-    })),
+    recentUsers: await (async () => {
+      const roleIds = [...new Set(tenant.users.flatMap((user) => user.roles.map((link) => link.roleId)))];
+      const roles = roleIds.length
+        ? await prisma.role.findMany({ where: { id: { in: roleIds } }, select: { id: true, code: true } })
+        : [];
+      const codeById = new Map(roles.map((role) => [role.id, role.code]));
+      return tenant.users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        status: user.status,
+        roles: user.roles.flatMap((link) => {
+          const code = codeById.get(link.roleId);
+          return code ? [code] : [];
+        }),
+      }));
+    })(),
     activity: activity.map((log) => ({
       id: log.id,
       action: log.action,
@@ -200,26 +213,18 @@ export async function getTenantDetail(id: string) {
   };
 }
 
+import {
+  MANUAL_ENABLE_MODULE_KEYS,
+  TENANT_MODULE_KEYS,
+  isManualEnableModuleKey,
+} from "../../lib/module-keys.js";
+
 /** Module keys the super admin can toggle per tenant. Must match the campus nav + requireModule keys. */
-export const TENANT_MODULE_KEYS = [
-  "students",
-  "academics",
-  "attendance",
-  "notices",
-  "examinations",
-  "homework",
-  "fees",
-  "hr",
-  "documents",
-  "erp",
-  "timetable",
-  "reports",
-  "transport",
-  "hostel",
-  "library",
-  "inventory",
-  "onlineExam",
-] as const;
+export {
+  MANUAL_ENABLE_MODULE_KEYS,
+  TENANT_MODULE_KEYS,
+  isManualEnableModuleKey,
+};
 
 type DbClient = Prisma.TransactionClient | typeof prisma;
 
@@ -309,9 +314,21 @@ export async function createTenant(input: CreateTenantInput) {
   }
 
   const productMode = normalizeProductMode(input.type, input.productMode);
+  const email = input.adminEmail.trim().toLowerCase();
+  const phone = normalizeSmsNumber(input.adminPhone);
+  if (!phone || phone.replace(/\D/g, "").length < 10) {
+    throw new AppError(400, "A valid mobile number is required for the institution admin", "ADMIN_PHONE_REQUIRED");
+  }
+  const password = input.adminPassword?.trim() || "ChangeMe123!";
+  const passwordHash = await bcrypt.hash(password, PASSWORD_ROUNDS);
 
-  return prisma.$transaction(async (tx) => {
-    const tenant = await tx.tenant.create({
+  // Do not use prisma.$transaction(async tx => …) here. Render talks to Supabase
+  // through PgBouncer transaction pooling, which cannot hold an interactive
+  // transaction across the many role/bootstrap writes — that is what 500'd
+  // POST /platform/tenants. Sequential writes + cascade delete on failure is safe.
+  let tenantId: string | undefined;
+  try {
+    const tenant = await prisma.tenant.create({
       data: {
         name: input.name.trim(),
         slug,
@@ -322,38 +339,52 @@ export async function createTenant(input: CreateTenantInput) {
         branding: asJson(input.branding),
       },
     });
+    tenantId = tenant.id;
 
-    await ensureTenantRoles(tenant.id, tx);
-    await bootstrapTenantWorkspace(tenant.id, tx);
+    await ensureTenantRoles(tenant.id);
+    await bootstrapTenantWorkspace(tenant.id);
     if (input.modules) {
-      await applyTenantModuleSelection(tenant.id, input.modules, tx);
+      await applyTenantModuleSelection(tenant.id, input.modules);
     }
 
-    let admin: { email: string; phone: string; temporaryPassword?: string } | null = null;
-    const email = input.adminEmail.trim().toLowerCase();
-    const phone = normalizeSmsNumber(input.adminPhone);
-    if (!phone || phone.replace(/\D/g, "").length < 10) {
-      throw new AppError(400, "A valid mobile number is required for the institution admin", "ADMIN_PHONE_REQUIRED");
-    }
-    const role = await ensureInstitutionAdminRole(tenant.id, tx);
-    const password = input.adminPassword?.trim() || "ChangeMe123!";
-    const user = await tx.user.create({
+    const role = await ensureInstitutionAdminRole(tenant.id);
+    const user = await prisma.user.create({
       data: {
         tenantId: tenant.id,
         email,
         phone,
-        passwordHash: await bcrypt.hash(password, PASSWORD_ROUNDS),
+        passwordHash,
         firstName: input.adminFirstName?.trim() || "Institution",
         lastName: input.adminLastName?.trim() || "Administrator",
       },
     });
-    await tx.userRole.create({
+    await prisma.userRole.create({
       data: { userId: user.id, roleId: role.id, tenantId: tenant.id },
     });
-    admin = { email, phone, temporaryPassword: input.adminPassword ? undefined : password };
 
-    return { tenant, admin };
-  });
+    return {
+      tenant,
+      admin: {
+        email,
+        phone,
+        temporaryPassword: input.adminPassword ? undefined : password,
+      },
+    };
+  } catch (error) {
+    if (tenantId) {
+      await prisma.tenant.delete({ where: { id: tenantId } }).catch(() => undefined);
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const target = Array.isArray(error.meta?.target)
+        ? error.meta.target.join(".")
+        : String(error.meta?.target ?? "");
+      if (target.includes("slug")) {
+        throw new AppError(409, "A tenant with this slug already exists", "SLUG_TAKEN");
+      }
+      throw new AppError(409, "That admin email is already used for this workspace", "ADMIN_EMAIL_TAKEN");
+    }
+    throw error;
+  }
 }
 
 interface UpdateTenantInput {
@@ -456,6 +487,16 @@ export async function listPlatformUsers(query?: {
   status?: UserStatus;
   role?: string;
 }) {
+  let roleIdsForFilter: string[] | undefined;
+  if (query?.role) {
+    const matchingRoles = await prisma.role.findMany({
+      where: { code: query.role },
+      select: { id: true },
+    });
+    roleIdsForFilter = matchingRoles.map((role) => role.id);
+    if (roleIdsForFilter.length === 0) return [];
+  }
+
   const users = await prisma.user.findMany({
     where: {
       tenantId: query?.tenantId,
@@ -469,8 +510,8 @@ export async function listPlatformUsers(query?: {
             ],
           }
         : {}),
-      ...(query?.role
-        ? { roles: { some: { role: { code: query.role } } } }
+      ...(roleIdsForFilter
+        ? { roles: { some: { roleId: { in: roleIdsForFilter } } } }
         : {}),
     },
     orderBy: { createdAt: "desc" },
@@ -478,9 +519,33 @@ export async function listPlatformUsers(query?: {
     include: {
       tenant: { select: { id: true, name: true, slug: true } },
       reseller: { select: { id: true, name: true } },
-      roles: { include: { role: { select: { code: true, name: true } } } },
     },
   });
+
+  const userIds = users.map((user) => user.id);
+  const links = userIds.length
+    ? await prisma.userRole.findMany({
+        where: { userId: { in: userIds } },
+        select: { userId: true, roleId: true },
+      })
+    : [];
+  const roleIds = [...new Set(links.map((link) => link.roleId))];
+  const roles = roleIds.length
+    ? await prisma.role.findMany({
+        where: { id: { in: roleIds } },
+        select: { id: true, code: true },
+      })
+    : [];
+  const codeByRoleId = new Map(roles.map((role) => [role.id, role.code]));
+  const rolesByUser = new Map<string, string[]>();
+  for (const link of links) {
+    const code = codeByRoleId.get(link.roleId);
+    if (!code) continue;
+    const current = rolesByUser.get(link.userId) ?? [];
+    current.push(code);
+    rolesByUser.set(link.userId, current);
+  }
+
   return users.map((user) => ({
     id: user.id,
     email: user.email,
@@ -490,7 +555,7 @@ export async function listPlatformUsers(query?: {
     status: user.status,
     tenant: user.tenant,
     reseller: user.reseller,
-    roles: user.roles.map(({ role }) => role.code),
+    roles: rolesByUser.get(user.id) ?? [],
     createdAt: user.createdAt,
   }));
 }

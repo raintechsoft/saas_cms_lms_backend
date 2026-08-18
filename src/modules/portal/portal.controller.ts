@@ -11,6 +11,10 @@ import {
   getPortalChildFees,
   getPortalChildHomework,
   getPortalChildLeaves,
+  getPortalChildLiveClasses,
+  getPortalChildNcertResources,
+  getPortalChildNcertResource,
+  getPortalChildAcademicCalendar,
   getPortalChildTimetable,
   getPortalGeneratedDocument,
   listPortalNotices,
@@ -222,6 +226,64 @@ export async function getPortalTimetableController(req: Request, res: Response) 
       viewer(req),
       req.auth!.productMode,
       studentId,
+    ),
+  });
+}
+
+export async function getPortalLiveClassesController(req: Request, res: Response) {
+  const { studentId } = studentParams.parse(req.params);
+  res.json({
+    data: await getPortalChildLiveClasses(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+    ),
+  });
+}
+
+export async function getPortalNcertResourcesController(req: Request, res: Response) {
+  const { studentId } = studentParams.parse(req.params);
+  res.json({
+    data: await getPortalChildNcertResources(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+    ),
+  });
+}
+
+export async function getPortalNcertResourceController(req: Request, res: Response) {
+  const { studentId, resourceId } = z
+    .object({ studentId: z.string().min(1), resourceId: z.string().min(1) })
+    .parse(req.params);
+  res.json({
+    data: await getPortalChildNcertResource(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      resourceId,
+    ),
+  });
+}
+
+export async function getPortalAcademicCalendarController(req: Request, res: Response) {
+  const { studentId } = studentParams.parse(req.params);
+  const query = z
+    .object({
+      from: z.string().optional(),
+      to: z.string().optional(),
+    })
+    .parse(req.query);
+  res.json({
+    data: await getPortalChildAcademicCalendar(
+      req.auth!.tenantId!,
+      viewer(req),
+      req.auth!.productMode,
+      studentId,
+      query,
     ),
   });
 }

@@ -13,6 +13,10 @@ import {
   getPortalFeesController,
   getPortalHomeworkController,
   getPortalLeavesController,
+  getPortalLiveClassesController,
+  getPortalNcertResourcesController,
+  getPortalNcertResourceController,
+  getPortalAcademicCalendarController,
   getPortalOverviewController,
   getPortalTimetableController,
   listPortalNoticesController,
@@ -76,6 +80,16 @@ portalRouter.post(
   asyncHandler(uploadPortalDocumentController),
 );
 portalRouter.get("/children/:studentId/timetable", asyncHandler(getPortalTimetableController));
+portalRouter.get("/children/:studentId/live-classes", asyncHandler(getPortalLiveClassesController));
+portalRouter.get("/children/:studentId/ncert-content", asyncHandler(getPortalNcertResourcesController));
+portalRouter.get(
+  "/children/:studentId/ncert-content/:resourceId",
+  asyncHandler(getPortalNcertResourceController),
+);
+portalRouter.get(
+  "/children/:studentId/academic-calendar",
+  asyncHandler(getPortalAcademicCalendarController),
+);
 portalRouter.get("/children/:studentId/homework", asyncHandler(getPortalHomeworkController));
 portalRouter.get(
   "/children/:studentId/online-exams/attempts",

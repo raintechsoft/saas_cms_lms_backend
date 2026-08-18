@@ -3,6 +3,68 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { z } from "zod";
 
+/** Prisma-side pool. Render + Supabase PgBouncer cannot serve parallel queries with connection_limit=1 (P2024). */
+function withPrismaPoolSettings(raw: string): string {
+  try {
+    const parsed = new URL(raw);
+    const limit = Number(parsed.searchParams.get("connection_limit") || "0");
+    if (!Number.isFinite(limit) || limit < 5) {
+      parsed.searchParams.set("connection_limit", "10");
+    }
+    const timeout = Number(parsed.searchParams.get("pool_timeout") || "0");
+    if (!Number.isFinite(timeout) || timeout < 20) {
+      parsed.searchParams.set("pool_timeout", "20");
+    }
+    return parsed.toString();
+  } catch {
+    return raw;
+  }
+}
+
+function rewriteSupabaseDatabaseUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+
+  const directMatch = parsed.hostname.match(/^db\.([a-z0-9]+)\.supabase\.co$/i);
+  if (directMatch) {
+    const projectRef = directMatch[1];
+    const region = process.env.SUPABASE_POOLER_REGION?.trim() || "ap-southeast-1";
+    parsed.hostname = `aws-0-${region}.pooler.supabase.com`;
+    parsed.port = "6543";
+    const user = decodeURIComponent(parsed.username || "postgres");
+    if (user === "postgres" || !user.includes(".")) {
+      parsed.username = `postgres.${projectRef}`;
+    }
+    parsed.searchParams.set("pgbouncer", "true");
+    parsed.searchParams.set("sslmode", "require");
+    const rewritten = withPrismaPoolSettings(parsed.toString());
+    console.warn(
+      `[database] Rewrote direct Supabase host db.${projectRef}.supabase.co:5432 → ${parsed.hostname}:6543`,
+    );
+    return rewritten;
+  }
+
+  if (/supabase\.(co|com)/i.test(trimmed)) {
+    if (!parsed.searchParams.has("sslmode")) parsed.searchParams.set("sslmode", "require");
+    return withPrismaPoolSettings(parsed.toString());
+  }
+
+  return withPrismaPoolSettings(trimmed);
+}
+
+{
+  if (process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = rewriteSupabaseDatabaseUrl(process.env.DATABASE_URL);
+  }
+}
+
 // Accept common MSG91 env aliases (Windows/.env casing variants).
 {
   const authKey =
@@ -51,7 +113,7 @@ const schema = z
     SETTINGS_ENCRYPTION_KEY: z.string().min(32).optional(),
     API_PORT: z.coerce.number().int().positive().default(4000),
     API_PUBLIC_BASE_URL: z.string().url().optional(),
-    WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+    WEB_ORIGIN: z.string().min(1).default("http://localhost:5173"),
     SMTP_HOST: z.string().min(1).optional(),
     SMTP_PORT: z.coerce.number().int().positive().default(587),
     SMTP_SECURE: z
@@ -194,7 +256,10 @@ const schema = z
     }
   });
 
-export const env = schema.parse(process.env);
+export const env = schema.parse({
+  ...process.env,
+  WEB_ORIGIN: process.env.WEB_ORIGIN?.replace(/\/+$/, "") || "http://localhost:5173",
+});
 
 export function isMsg91EnvConfigured() {
   return Boolean(env.MSG91_AUTH_KEY && env.MSG91_SENDER_ID);

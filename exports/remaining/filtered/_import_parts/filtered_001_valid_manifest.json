@@ -1,0 +1,26 @@
+{
+  "source": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\filtered_001.sql",
+  "valid_statements": 85,
+  "chunks": [
+    {
+      "file": "filtered_001_valid_000.sql",
+      "statements": 25,
+      "path": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\_import_parts\\filtered_001_valid_000.sql"
+    },
+    {
+      "file": "filtered_001_valid_001.sql",
+      "statements": 25,
+      "path": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\_import_parts\\filtered_001_valid_001.sql"
+    },
+    {
+      "file": "filtered_001_valid_002.sql",
+      "statements": 25,
+      "path": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\_import_parts\\filtered_001_valid_002.sql"
+    },
+    {
+      "file": "filtered_001_valid_003.sql",
+      "statements": 10,
+      "path": "c:\\Users\\raint\\OneDrive\\Desktop\\saas\\backend\\exports\\remaining\\filtered\\_import_parts\\filtered_001_valid_003.sql"
+    }
+  ]
+}

@@ -9,8 +9,11 @@ import {
   createQuestionTypeController,
   deleteCategoryController,
   deleteQuestionController,
+  downloadImportTemplateController,
   getQuestionController,
   getSettingsController,
+  getStatsController,
+  importQuestionsController,
   listCategoriesController,
   listDifficultyLevelsController,
   listQuestionTypesController,
@@ -56,6 +59,16 @@ questionBankRouter.delete(
 
 // Questions
 questionBankRouter.get("/questions", asyncHandler(listQuestionsController));
+questionBankRouter.get(
+  "/questions/import-template",
+  canCreateOrEditQuestion,
+  asyncHandler(downloadImportTemplateController),
+);
+questionBankRouter.post(
+  "/questions/import",
+  canCreateOrEditQuestion,
+  asyncHandler(importQuestionsController),
+);
 questionBankRouter.get("/questions/:id", asyncHandler(getQuestionController));
 questionBankRouter.post(
   "/questions",
@@ -97,7 +110,8 @@ questionBankRouter.post(
   asyncHandler(createDifficultyLevelController),
 );
 
-// Module settings toggle (also surfaced via ERP question-bank-settings)
+// Dashboard stats + module settings
+questionBankRouter.get("/stats", asyncHandler(getStatsController));
 questionBankRouter.get("/settings", asyncHandler(getSettingsController));
 questionBankRouter.patch("/settings", adminOnly, asyncHandler(updateSettingsController));
 questionBankRouter.post(

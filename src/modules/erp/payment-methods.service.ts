@@ -289,7 +289,7 @@ async function ensureDefaults(tenantId: string) {
           displayName: "NEFT / RTGS / IMPS",
           description: "School bank account transfer",
           provider: "offline",
-          modes: { netbanking: true },
+          modes: { cards: false, upi: false, netbanking: true, wallets: false, emi: false },
           enableForFees: true,
           enableForAdmission: true,
           enableForMisc: true,

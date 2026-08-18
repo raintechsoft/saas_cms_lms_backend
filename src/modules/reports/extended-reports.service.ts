@@ -2,6 +2,7 @@ import {
   EnrollmentStatus,
   ExamStatus,
   InventoryMovementType,
+  LibraryLoanStatus,
   OnlineAttemptStatus,
   OnlineQuestionType,
   Prisma,
@@ -539,9 +540,9 @@ export async function runExtendedReport(
   ) {
     const now = new Date();
     const loanWhere: Prisma.LibraryLoanWhereInput = tenantScope(tenantId, {
-      ...(reportKey === "book_issue" ? { status: "ISSUED" } : {}),
-      ...(reportKey === "book_due" ? { status: "ISSUED", dueAt: { lt: now } } : {}),
-      ...(reportKey === "book_return" ? { status: "RETURNED" } : {}),
+      ...(reportKey === "book_issue" ? { status: LibraryLoanStatus.ISSUED } : {}),
+      ...(reportKey === "book_due" ? { status: LibraryLoanStatus.ISSUED, dueAt: { lt: now } } : {}),
+      ...(reportKey === "book_return" ? { status: LibraryLoanStatus.RETURNED } : {}),
       ...(query.from || query.to
         ? {
             issuedAt: {

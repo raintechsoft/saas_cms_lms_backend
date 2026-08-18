@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -339,6 +340,7 @@ model Tenant {
   onlineFeeOrders        OnlineFeeOrder[]
   feeSetting             TenantFeeSetting?
   questionBankSetting    TenantQuestionBankSetting?
+  testSeriesSetting      TenantTestSeriesSetting?
   homeworkSetting        TenantHomeworkSetting?
   homeworkTypes          HomeworkType[]
   homeworkWorkflowStatuses HomeworkWorkflowStatus[]
@@ -452,6 +454,21 @@ model Tenant {
   sessionLoginPolicy     TenantSessionLoginPolicy?
   userLoginSessions      UserLoginSession[]
   loginActivityLogs      LoginActivityLog[]
+  questionTypeConfigs    QuestionTypeConfig[]
+  difficultyLevelConfigs DifficultyLevelConfig[]
+  questionCategories     QuestionCategory[]
+  bankQuestions          Question[]
+  testSeries             TestSeries[]
+  testSeriesPapers       TestSeriesPaper[]
+  testSeriesPaperQuestions TestSeriesPaperQuestion[]
+  lessonPlanningSetting  TenantLessonPlanningSetting?
+  lessonPlans            LessonPlan[]
+  liveClassesSetting     TenantLiveClassesSetting?
+  liveClasses            LiveClass[]
+  ncertSetting           TenantNcertSetting?
+  ncertResources         NcertResource[]
+  academicCalendarSetting TenantAcademicCalendarSetting?
+  academicEvents         AcademicEvent[]
 
   @@index([resellerId])
   @@map("tenants")
@@ -519,6 +536,14 @@ model User {
   academicBulkLogs         AcademicBulkUpdateLog[]      @relation("AcademicBulkActor")
   websitePagesUpdated      WebsitePage[]                @relation("WebsitePageUpdater")
   websiteMediaUploaded     WebsiteMediaAsset[]          @relation("WebsiteMediaUploader")
+  questionsCreated         Question[]                   @relation("QuestionCreatedBy")
+  questionsReviewed        Question[]                   @relation("QuestionReviewedBy")
+  testSeriesCreated        TestSeries[]                 @relation("TestSeriesCreator")
+  lessonPlansCreated       LessonPlan[]                 @relation("LessonPlanCreator")
+  liveClassesCreated       LiveClass[]                  @relation("LiveClassCreator")
+  liveClassesHosted        LiveClass[]                  @relation("LiveClassHost")
+  ncertResourcesCreated    NcertResource[]              @relation("NcertResourceCreator")
+  academicEventsCreated    AcademicEvent[]              @relation("AcademicEventCreator")
 
   @@unique([tenantId, email])
   @@index([email])
@@ -792,6 +817,12 @@ model AcademicClass {
   timetableTemplates TimetableTemplateClass[]
   gradingScaleClasses GradingScaleClass[]
   multiFeeBooks       MultiFeeBookClass[]
+  bankQuestions       Question[]
+  testSeries          TestSeries[]
+  lessonPlans         LessonPlan[]
+  liveClasses         LiveClass[]
+  ncertResources      NcertResource[]
+  academicEvents      AcademicEvent[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, code])
@@ -841,6 +872,7 @@ model ClassSection {
   onlineAdmissions  OnlineAdmissionApplication[]
   notices           Notice[]
   notifications     Notification[]
+  liveClasses       LiveClass[]
 
   @@unique([tenantId, academicSessionId, classId, sectionId])
   @@index([tenantId, academicSessionId])
@@ -885,6 +917,12 @@ model Subject {
   electiveCategory   ElectiveCategory?           @relation(fields: [electiveCategoryId], references: [id], onDelete: SetNull)
   classSubjects      ClassSubject[]
   studentElectives   StudentElectiveAssignment[]
+  questionCategories QuestionCategory[]
+  bankQuestions      Question[]
+  testSeries         TestSeries[]
+  lessonPlans        LessonPlan[]
+  liveClasses        LiveClass[]
+  ncertResources     NcertResource[]
 
   @@unique([tenantId, name])
   @@unique([tenantId, code])
@@ -1978,12 +2016,24 @@ model TenantQuestionBankSetting {
   allowImport            Boolean                  @default(true) @map("allow_import")
   allowExport            Boolean                  @default(true) @map("allow_export")
   requireApproval        Boolean                  @default(false) @map("require_approval")
+  allowTeachersToAddQuestions Boolean             @default(false) @map("allow_teachers_to_add_questions")
   createdAt              DateTime                 @default(now()) @map("created_at")
   updatedAt              DateTime                 @updatedAt @map("updated_at")
   tenant                 Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   difficultyRules        QuestionBankDifficultyRule[]
 
   @@map("tenant_question_bank_settings")
+}
+
+model TenantTestSeriesSetting {
+  id                            String   @id @default(cuid())
+  tenantId                      String   @unique @map("tenant_id")
+  allowTeachersToCreateTestSeries Boolean @default(false) @map("allow_teachers_to_create_test_series")
+  createdAt                     DateTime @default(now()) @map("created_at")
+  updatedAt                     DateTime @updatedAt @map("updated_at")
+  tenant                        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_test_series_settings")
 }
 
 model QuestionBankDifficultyRule {
@@ -4181,3 +4231,466 @@ model LoginActivityLog {
   @@index([tenantId, createdAt])
   @@map("login_activity_logs")
 }
+
+// ============================================================
+// LMS QUESTION BANK — tenant-configurable types/levels + questions
+// ERP toggle `allowTeachersToAddQuestions` lives on TenantQuestionBankSetting
+// ============================================================
+
+enum QuestionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum QuestionSource {
+  MANUAL
+  NCERT
+  AI_GENERATED
+  IMPORTED
+}
+
+enum QuestionMediaType {
+  IMAGE
+  AUDIO
+  VIDEO
+}
+
+enum QuestionUsageContext {
+  EXAM_PAPER
+  TEST_SERIES
+}
+
+model QuestionTypeConfig {
+  id           String     @id @default(cuid())
+  tenantId     String     @map("tenant_id")
+  name         String
+  defaultMarks Decimal    @map("default_marks") @db.Decimal(6, 2)
+  isActive     Boolean    @default(true) @map("is_active")
+  sortOrder    Int        @default(0) @map("sort_order")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  tenant       Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  questions    Question[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, sortOrder])
+  @@map("question_type_configs")
+}
+
+model DifficultyLevelConfig {
+  id        String     @id @default(cuid())
+  tenantId  String     @map("tenant_id")
+  name      String
+  colorTag  String     @map("color_tag")
+  sortOrder Int        @default(0) @map("sort_order")
+  isActive  Boolean    @default(true) @map("is_active")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, sortOrder])
+  @@map("difficulty_level_configs")
+}
+
+model QuestionCategory {
+  id               String             @id @default(cuid())
+  tenantId         String             @map("tenant_id")
+  subjectId        String             @map("subject_id")
+  name             String
+  parentCategoryId String?            @map("parent_category_id")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+  tenant           Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject          Subject            @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  parentCategory   QuestionCategory?  @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id], onDelete: SetNull)
+  subCategories    QuestionCategory[] @relation("CategoryHierarchy")
+  questions        Question[]
+
+  @@index([tenantId, subjectId])
+  @@index([parentCategoryId])
+  @@map("question_categories")
+}
+
+model Question {
+  id                String                @id @default(cuid())
+  tenantId          String                @map("tenant_id")
+  subjectId         String                @map("subject_id")
+  classId           String?               @map("class_id")
+  categoryId        String?               @map("category_id")
+  questionTypeId    String                @map("question_type_id")
+  difficultyLevelId String                @map("difficulty_level_id")
+  status            QuestionStatus        @default(DRAFT)
+  source            QuestionSource        @default(MANUAL)
+  questionText      String                @map("question_text") @db.Text
+  explanation       String?               @db.Text
+  marks             Decimal               @db.Decimal(6, 2)
+  negativeMarks     Decimal?              @map("negative_marks") @db.Decimal(6, 2)
+  tags              String[]              @default([])
+  createdById       String                @map("created_by_id")
+  reviewedById      String?               @map("reviewed_by_id")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+  deletedAt         DateTime?             @map("deleted_at")
+  tenant            Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject           Subject               @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  academicClass     AcademicClass?        @relation(fields: [classId], references: [id], onDelete: SetNull)
+  category          QuestionCategory?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  questionType      QuestionTypeConfig    @relation(fields: [questionTypeId], references: [id], onDelete: Restrict)
+  difficultyLevel   DifficultyLevelConfig @relation(fields: [difficultyLevelId], references: [id], onDelete: Restrict)
+  createdBy         User                  @relation("QuestionCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy        User?                 @relation("QuestionReviewedBy", fields: [reviewedById], references: [id], onDelete: SetNull)
+  options           QuestionOption[]
+  media             QuestionMedia[]
+  usageLogs         QuestionUsageLog[]
+  testSeriesLinks   TestSeriesPaperQuestion[]
+
+  @@index([tenantId, subjectId, status])
+  @@index([tenantId, categoryId])
+  @@index([tenantId, difficultyLevelId])
+  @@index([tenantId, createdById])
+  @@index([tenantId, deletedAt])
+  @@map("bank_questions")
+}
+
+model QuestionOption {
+  id         String   @id @default(cuid())
+  questionId String   @map("question_id")
+  optionText String   @map("option_text") @db.Text
+  isCorrect  Boolean  @default(false) @map("is_correct")
+  sortOrder  Int      @default(0) @map("sort_order")
+  mediaUrl   String?  @map("media_url")
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId, sortOrder])
+  @@map("bank_question_options")
+}
+
+model QuestionMedia {
+  id         String            @id @default(cuid())
+  questionId String            @map("question_id")
+  url        String
+  type       QuestionMediaType
+  altText    String?           @map("alt_text")
+  createdAt  DateTime          @default(now()) @map("created_at")
+  question   Question          @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@map("bank_question_media")
+}
+
+model QuestionUsageLog {
+  id         String               @id @default(cuid())
+  questionId String               @map("question_id")
+  context    QuestionUsageContext
+  refId      String               @map("ref_id")
+  usedAt     DateTime             @default(now()) @map("used_at")
+  question   Question             @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+  @@index([context, refId])
+  @@map("bank_question_usage_logs")
+}
+
+// ============================================================
+// LMS TEST SERIES — papers that consume Question Bank questions
+// ============================================================
+
+enum TestSeriesStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model TestSeries {
+  id          String           @id @default(cuid())
+  tenantId    String           @map("tenant_id")
+  name        String
+  description String?          @db.Text
+  subjectId   String?          @map("subject_id")
+  classId     String?          @map("class_id")
+  status      TestSeriesStatus @default(DRAFT)
+  createdById String           @map("created_by_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject     Subject?         @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  academicClass AcademicClass? @relation(fields: [classId], references: [id], onDelete: SetNull)
+  createdBy   User             @relation("TestSeriesCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  papers      TestSeriesPaper[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, subjectId])
+  @@index([tenantId, createdAt])
+  @@map("test_series")
+}
+
+/// Papers inherit ownership from `TestSeries.createdById` (no paper-level creator).
+/// See `modules/testSeries/README.md` — admin-created drafts on a teacher's series are editable by that teacher by design.
+model TestSeriesPaper {
+  id              String           @id @default(cuid())
+  tenantId        String           @map("tenant_id")
+  seriesId        String           @map("series_id")
+  title           String
+  instructions    String?          @db.Text
+  durationMinutes Int              @default(60) @map("duration_minutes")
+  passMarks       Decimal?         @map("pass_marks") @db.Decimal(8, 2)
+  sortOrder       Int              @default(0) @map("sort_order")
+  status          TestSeriesStatus @default(DRAFT)
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  series          TestSeries       @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  questions       TestSeriesPaperQuestion[]
+
+  @@index([tenantId, seriesId, sortOrder])
+  @@index([tenantId, status])
+  @@map("test_series_papers")
+}
+
+model TestSeriesPaperQuestion {
+  id         String          @id @default(cuid())
+  tenantId   String          @map("tenant_id")
+  paperId    String          @map("paper_id")
+  questionId String          @map("question_id")
+  sortOrder  Int             @default(0) @map("sort_order")
+  marks      Decimal         @db.Decimal(6, 2)
+  createdAt  DateTime        @default(now()) @map("created_at")
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  paper      TestSeriesPaper @relation(fields: [paperId], references: [id], onDelete: Cascade)
+  question   Question        @relation(fields: [questionId], references: [id], onDelete: Restrict)
+
+  @@unique([paperId, questionId])
+  @@index([tenantId, paperId, sortOrder])
+  @@index([questionId])
+  @@map("test_series_paper_questions")
+}
+
+// ============================================================
+// LMS LESSON PLANNING — teacher lesson plans by subject/class
+// ============================================================
+
+enum LessonPlanStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model TenantLessonPlanningSetting {
+  id                             String   @id @default(cuid())
+  tenantId                       String   @unique @map("tenant_id")
+  allowTeachersToCreateLessonPlans Boolean @default(false) @map("allow_teachers_to_create_lesson_plans")
+  createdAt                      DateTime @default(now()) @map("created_at")
+  updatedAt                      DateTime @updatedAt @map("updated_at")
+  tenant                         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_lesson_planning_settings")
+}
+
+/// Ownership unit = the lesson plan creator (`createdById`), same pattern as Question Bank drafts.
+model LessonPlan {
+  id               String           @id @default(cuid())
+  tenantId         String           @map("tenant_id")
+  title            String
+  topic            String?
+  objectives       String?          @db.Text
+  materials        String?          @db.Text
+  activities       String?          @db.Text
+  assessmentNotes  String?          @map("assessment_notes") @db.Text
+  homework         String?          @db.Text
+  subjectId        String?          @map("subject_id")
+  classId          String?          @map("class_id")
+  plannedDate      DateTime?        @map("planned_date") @db.Date
+  durationMinutes  Int?             @map("duration_minutes")
+  status           LessonPlanStatus @default(DRAFT)
+  createdById      String           @map("created_by_id")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject          Subject?         @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  academicClass    AcademicClass?   @relation(fields: [classId], references: [id], onDelete: SetNull)
+  createdBy        User             @relation("LessonPlanCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status])
+  @@index([tenantId, subjectId])
+  @@index([tenantId, classId])
+  @@index([tenantId, plannedDate])
+  @@index([tenantId, createdById])
+  @@map("lesson_plans")
+}
+
+// ============================================================
+// LMS LIVE CLASSES — one-off scheduled sessions with join URL
+// ============================================================
+
+enum LiveClassStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+model TenantLiveClassesSetting {
+  id                             String   @id @default(cuid())
+  tenantId                       String   @unique @map("tenant_id")
+  allowTeachersToCreateLiveClasses Boolean @default(false) @map("allow_teachers_to_create_live_classes")
+  createdAt                      DateTime @default(now()) @map("created_at")
+  updatedAt                      DateTime @updatedAt @map("updated_at")
+  tenant                         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_live_classes_settings")
+}
+
+/// Ownership for edit/delete drafts = `createdById`. Host for the session = `hostTeacherId` (defaults to creator).
+/// Lifecycle LIVE/UPCOMING/ENDED is computed from startsAt/endsAt when status is PUBLISHED.
+model LiveClass {
+  id             String          @id @default(cuid())
+  tenantId       String          @map("tenant_id")
+  title          String
+  topic          String?
+  description    String?         @db.Text
+  meetingUrl     String?         @map("meeting_url")
+  provider       String?         // zoom | meet | teams | other
+  subjectId      String?         @map("subject_id")
+  classId        String?         @map("class_id")
+  classSectionId String?         @map("class_section_id")
+  startsAt       DateTime        @map("starts_at")
+  endsAt         DateTime        @map("ends_at")
+  status         LiveClassStatus @default(DRAFT)
+  hostTeacherId  String          @map("host_teacher_id")
+  createdById    String          @map("created_by_id")
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject        Subject?        @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  academicClass  AcademicClass?  @relation(fields: [classId], references: [id], onDelete: SetNull)
+  classSection   ClassSection?   @relation(fields: [classSectionId], references: [id], onDelete: SetNull)
+  hostTeacher    User            @relation("LiveClassHost", fields: [hostTeacherId], references: [id], onDelete: Restrict)
+  createdBy      User            @relation("LiveClassCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status])
+  @@index([tenantId, startsAt])
+  @@index([tenantId, classId])
+  @@index([tenantId, classSectionId])
+  @@index([tenantId, hostTeacherId])
+  @@index([tenantId, createdById])
+  @@map("live_classes")
+}
+
+// ============================================================
+// LMS NCERT CONTENT — flat study resources (class/subject/chapter)
+// ============================================================
+
+enum NcertResourceStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum NcertResourceType {
+  LINK
+  FILE
+}
+
+model TenantNcertSetting {
+  id                              String   @id @default(cuid())
+  tenantId                        String   @unique @map("tenant_id")
+  allowTeachersToCreateNcertResources Boolean @default(false) @map("allow_teachers_to_create_ncert_resources")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+  tenant                          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_ncert_settings")
+}
+
+/// Flat library item. Chapter is a searchable string field (no Book→Chapter tree in v1).
+model NcertResource {
+  id           String              @id @default(cuid())
+  tenantId     String              @map("tenant_id")
+  title        String
+  description  String?             @db.Text
+  chapter      String?
+  /// BOOKS | EXEMPLAR | SOLUTIONS | LAB_MANUAL | RESOURCE_MAP
+  category     String              @default("BOOKS")
+  resourceType NcertResourceType   @default(LINK) @map("resource_type")
+  resourceUrl  String?             @map("resource_url")
+  fileName     String?             @map("file_name")
+  subjectId    String?             @map("subject_id")
+  classId      String?             @map("class_id")
+  status       NcertResourceStatus @default(DRAFT)
+  createdById  String              @map("created_by_id")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subject      Subject?            @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  academicClass AcademicClass?     @relation(fields: [classId], references: [id], onDelete: SetNull)
+  createdBy    User                @relation("NcertResourceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status])
+  @@index([tenantId, subjectId])
+  @@index([tenantId, classId])
+  @@index([tenantId, chapter])
+  @@index([tenantId, category])
+  @@index([tenantId, createdById])
+  @@map("ncert_resources")
+}
+
+// ============================================================
+// LMS ACADEMIC CALENDAR — school events, exams, holidays, meetings
+// ============================================================
+
+enum AcademicEventStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum AcademicEventType {
+  ACADEMIC
+  EXAMINATION
+  HOLIDAY
+  MEETING
+  OTHER
+  IMPORTANT
+}
+
+model TenantAcademicCalendarSetting {
+  id                              String   @id @default(cuid())
+  tenantId                        String   @unique @map("tenant_id")
+  allowTeachersToCreateEvents     Boolean  @default(false) @map("allow_teachers_to_create_events")
+  importantNotes                  String?  @db.Text @map("important_notes")
+  createdAt                       DateTime @default(now()) @map("created_at")
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+  tenant                          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_academic_calendar_settings")
+}
+
+model AcademicEvent {
+  id          String               @id @default(cuid())
+  tenantId    String               @map("tenant_id")
+  title       String
+  description String?              @db.Text
+  location    String?
+  eventType   AcademicEventType    @default(ACADEMIC) @map("event_type")
+  status      AcademicEventStatus  @default(DRAFT)
+  startAt     DateTime             @map("start_at")
+  endAt       DateTime?            @map("end_at")
+  allDay      Boolean              @default(true) @map("all_day")
+  classId     String?              @map("class_id")
+  createdById String               @map("created_by_id")
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicClass AcademicClass?     @relation(fields: [classId], references: [id], onDelete: SetNull)
+  createdBy   User                 @relation("AcademicEventCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status])
+  @@index([tenantId, eventType])
+  @@index([tenantId, startAt])
+  @@index([tenantId, classId])
+  @@index([tenantId, createdById])
+  @@map("academic_events")
+}
+

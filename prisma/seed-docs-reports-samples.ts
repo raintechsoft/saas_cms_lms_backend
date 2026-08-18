@@ -269,7 +269,7 @@ async function main() {
         academicSessionId: session.id,
         classSectionId: class10b.id,
         rollNumber: "99",
-        status: EnrollmentStatus.INACTIVE,
+        status: EnrollmentStatus.WITHDRAWN,
       },
     });
   }

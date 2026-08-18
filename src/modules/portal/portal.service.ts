@@ -117,62 +117,171 @@ async function buildStudentSnapshot(
   const fromDate = new Date();
   fromDate.setUTCDate(fromDate.getUTCDate() - 30);
 
-  const [timetable, homeworkRows, attendanceRecords, examStudents, feeStatement] =
-    await Promise.all([
-      includeLms
-        ? prisma.timetableEntry.findMany({
-            where: tenantScope(tenantId, { academicSessionId: sessionId, classSectionId }),
-            include: {
-              classSubject: { include: { subject: true } },
-              teacher: { select: { firstName: true, lastName: true } },
-            },
-            orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
-          })
-        : Promise.resolve([]),
-      includeHomework
-        ? prisma.homework.findMany({
+  const emptySnapshot = {
+    student: mapStudentProfile(student),
+    relation: meta.relation,
+    isPrimary: meta.isPrimary,
+    enrollment: {
+      id: enrollment.id,
+      rollNumber: enrollment.rollNumber,
+      session: enrollment.academicSession?.name ?? "",
+      className: enrollment.classSection?.academicClass?.name ?? "",
+      section: enrollment.classSection?.section?.name ?? "",
+      classTeacher: enrollment.classSection.classTeacher
+        ? `${enrollment.classSection.classTeacher.firstName} ${enrollment.classSection.classTeacher.lastName}`
+        : null,
+    },
+    timetable: [] as Array<{
+      id: string;
+      weekday: string;
+      startTime: string;
+      endTime: string;
+      room: string | null;
+      subject: string;
+      teacher: string | null;
+    }>,
+    homework: [] as Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      subject: string;
+      homeworkDate: Date;
+      submissionDate: Date;
+      attachmentUrl: string | null;
+      studentEnrollmentId: string;
+      submission: {
+        id: string;
+        status: string;
+        review: string | null;
+        attempt: number;
+      } | null;
+    }>,
+    attendance: {
+      summary: {
+        total: 0,
+        present: 0,
+        late: 0,
+        absent: 0,
+        halfDay: 0,
+        holiday: 0,
+        percentage: 0,
+      },
+      recent: [] as Array<{ date: Date; status: AttendanceStatus; periodKey: string | null }>,
+    },
+    exams: [] as Array<{
+      examId: string;
+      examName: string;
+      groupName: string;
+      examDate: string | null;
+      publishedAt: string | null;
+      maximumMarks: number;
+      obtainedMarks: number;
+      percentage: number;
+      passStatus: PassStatus;
+      subjects: Array<{
+        subject: string;
+        marksObtained: number;
+        maximumMarks: number;
+        isAbsent: boolean;
+        examDate: string | null;
+      }>;
+    }>,
+    fees: null as {
+      totals: unknown;
+      items: Array<{ name: string; balance: number; paid: number; base: number }>;
+    } | null,
+  };
+
+  let timetable: any[] = [];
+  let homeworkRows: any[] = [];
+  let attendanceRecords: any[] = [];
+  let examStudents: any[] = [];
+  let feeStatement: Awaited<ReturnType<typeof listStudentFees>> | null = null;
+
+  try {
+    [timetable, homeworkRows, attendanceRecords, examStudents, feeStatement] =
+      await Promise.all([
+        includeLms
+          ? prisma.timetableEntry
+              .findMany({
+                where: tenantScope(tenantId, { academicSessionId: sessionId, classSectionId }),
+                include: {
+                  classSubject: { include: { subject: true } },
+                  teacher: { select: { firstName: true, lastName: true } },
+                },
+                orderBy: [{ weekday: "asc" }, { startTime: "asc" }],
+              })
+              .catch((error) => {
+                console.error("[portal/overview] timetable", error);
+                return [];
+              })
+          : Promise.resolve([]),
+        includeHomework
+          ? prisma.homework
+              .findMany({
+                where: tenantScope(tenantId, {
+                  academicSessionId: sessionId,
+                  classSectionId,
+                  status: HomeworkStatus.PUBLISHED,
+                }),
+                include: {
+                  classSubject: { include: { subject: true } },
+                  submissions: { where: { studentEnrollmentId: enrollment.id } },
+                },
+                orderBy: { submissionDate: "desc" },
+                take: 30,
+              })
+              .catch((error) => {
+                console.error("[portal/overview] homework", error);
+                return [];
+              })
+          : Promise.resolve([]),
+        prisma.attendanceRecord
+          .findMany({
             where: tenantScope(tenantId, {
-              academicSessionId: sessionId,
-              classSectionId,
-              status: HomeworkStatus.PUBLISHED,
+              studentEnrollment: { id: enrollment.id },
+              attendanceDate: { gte: fromDate },
+            }),
+            orderBy: { attendanceDate: "desc" },
+            take: 60,
+          })
+          .catch((error) => {
+            console.error("[portal/overview] attendance", error);
+            return [];
+          }),
+        prisma.examStudent
+          .findMany({
+            where: tenantScope(tenantId, {
+              studentEnrollmentId: enrollment.id,
+              showOnPortal: true,
+              exam: { status: ExamStatus.PUBLISHED },
             }),
             include: {
-              classSubject: { include: { subject: true } },
-              submissions: { where: { studentEnrollmentId: enrollment.id } },
-            },
-            orderBy: { submissionDate: "desc" },
-            take: 30,
-          })
-        : Promise.resolve([]),
-      prisma.attendanceRecord.findMany({
-        where: tenantScope(tenantId, {
-          studentEnrollment: { id: enrollment.id },
-          attendanceDate: { gte: fromDate },
-        }),
-        orderBy: { attendanceDate: "desc" },
-        take: 60,
-      }),
-      prisma.examStudent.findMany({
-        where: tenantScope(tenantId, {
-          studentEnrollmentId: enrollment.id,
-          showOnPortal: true,
-          exam: { status: ExamStatus.PUBLISHED },
-        }),
-        include: {
-          exam: { include: { examGroup: true } },
-          marks: {
-            include: {
-              schedule: {
-                include: { classSubject: { include: { subject: true } } },
+              exam: { include: { examGroup: true } },
+              marks: {
+                include: {
+                  schedule: {
+                    include: { classSubject: { include: { subject: true } } },
+                  },
+                },
               },
             },
-          },
-        },
-      }),
-      includeCms
-        ? listStudentFees(tenantId, student.id, sessionId).catch(() => null)
-        : Promise.resolve(null),
-    ]);
+          })
+          .catch((error) => {
+            console.error("[portal/overview] exams", error);
+            return [];
+          }),
+        includeCms
+          ? listStudentFees(tenantId, student.id, sessionId).catch((error) => {
+              console.error("[portal/overview] fees", error);
+              return null;
+            })
+          : Promise.resolve(null),
+      ]);
+  } catch (error) {
+    console.error("[portal/overview] snapshot", error);
+    return emptySnapshot;
+  }
 
   const attendanceCounts = attendanceRecords.reduce(
     (acc, record) => {
@@ -190,37 +299,38 @@ async function buildStudentSnapshot(
   const attended =
     attendanceCounts.present + attendanceCounts.late + attendanceCounts.halfDay * 0.5;
 
-  const exams = examStudents.map((examStudent) => {
-    const maximumMarks = examStudent.marks.reduce(
-      (sum, mark) => sum + Number(mark.schedule.maximumMarks),
+  const exams = examStudents.map((examStudent: any) => {
+    const marks = (examStudent.marks ?? []) as any[];
+    const maximumMarks = marks.reduce(
+      (sum: number, mark: any) => sum + Number(mark.schedule?.maximumMarks ?? 0),
       0,
     );
-    const obtainedMarks = examStudent.marks.reduce(
-      (sum, mark) => sum + Number(mark.marksObtained),
+    const obtainedMarks = marks.reduce(
+      (sum: number, mark: any) => sum + Number(mark.marksObtained ?? 0),
       0,
     );
-    const failed = examStudent.marks.some(
-      (mark) =>
+    const failed = marks.some(
+      (mark: any) =>
         mark.isAbsent ||
-        Number(mark.marksObtained) < Number(mark.schedule.minimumMarks),
+        Number(mark.marksObtained) < Number(mark.schedule?.minimumMarks ?? 0),
     );
-    const dates = examStudent.marks
-      .map((mark) => new Date(mark.schedule.examDate).getTime())
-      .filter((value) => Number.isFinite(value));
+    const dates = marks
+      .map((mark: any) => new Date(mark.schedule?.examDate).getTime())
+      .filter((value: number) => Number.isFinite(value));
     const examDate =
       dates.length > 0
         ? new Date(Math.max(...dates)).toISOString()
-        : examStudent.exam.startDate
+        : examStudent.exam?.startDate
           ? new Date(examStudent.exam.startDate).toISOString()
-          : examStudent.exam.publishedAt
+          : examStudent.exam?.publishedAt
             ? new Date(examStudent.exam.publishedAt).toISOString()
             : null;
     return {
       examId: examStudent.examId,
-      examName: examStudent.exam.name,
-      groupName: examStudent.exam.examGroup.name,
+      examName: examStudent.exam?.name ?? "Exam",
+      groupName: examStudent.exam?.examGroup?.name ?? "Exam",
       examDate,
-      publishedAt: examStudent.exam.publishedAt
+      publishedAt: examStudent.exam?.publishedAt
         ? new Date(examStudent.exam.publishedAt).toISOString()
         : null,
       maximumMarks,
@@ -229,12 +339,12 @@ async function buildStudentSnapshot(
         ? Number(((obtainedMarks / maximumMarks) * 100).toFixed(2))
         : 0,
       passStatus: failed ? PassStatus.FAIL : PassStatus.PASS,
-      subjects: examStudent.marks.map((mark) => ({
-        subject: mark.schedule.classSubject.subject.name,
+      subjects: marks.map((mark: any) => ({
+        subject: mark.schedule?.classSubject?.subject?.name ?? "Subject",
         marksObtained: Number(mark.marksObtained),
-        maximumMarks: Number(mark.schedule.maximumMarks),
+        maximumMarks: Number(mark.schedule?.maximumMarks ?? 0),
         isAbsent: mark.isAbsent,
-        examDate: mark.schedule.examDate
+        examDate: mark.schedule?.examDate
           ? new Date(mark.schedule.examDate).toISOString()
           : null,
       })),
@@ -248,9 +358,9 @@ async function buildStudentSnapshot(
     enrollment: {
       id: enrollment.id,
       rollNumber: enrollment.rollNumber,
-      session: enrollment.academicSession.name,
-      className: enrollment.classSection.academicClass.name,
-      section: enrollment.classSection.section.name,
+      session: enrollment.academicSession?.name ?? "",
+      className: enrollment.classSection?.academicClass?.name ?? "",
+      section: enrollment.classSection?.section?.name ?? "",
       classTeacher: enrollment.classSection.classTeacher
         ? `${enrollment.classSection.classTeacher.firstName} ${enrollment.classSection.classTeacher.lastName}`
         : null,
@@ -261,7 +371,7 @@ async function buildStudentSnapshot(
       startTime: entry.startTime,
       endTime: entry.endTime,
       room: entry.room,
-      subject: entry.classSubject.subject.name,
+      subject: entry.classSubject?.subject?.name ?? "Period",
       teacher: entry.teacher
         ? `${entry.teacher.firstName} ${entry.teacher.lastName}`
         : null,
@@ -270,12 +380,12 @@ async function buildStudentSnapshot(
       id: item.id,
       title: item.title,
       description: item.description,
-      subject: item.classSubject.subject.name,
+      subject: item.classSubject?.subject?.name ?? "Homework",
       homeworkDate: item.homeworkDate,
       submissionDate: item.submissionDate,
       attachmentUrl: item.attachmentUrl,
       studentEnrollmentId: enrollment.id,
-      submission: item.submissions[0]
+      submission: item.submissions?.[0]
         ? {
             id: item.submissions[0].id,
             status: item.submissions[0].status,
@@ -325,7 +435,17 @@ export async function getPortalOverview(
   if (!isStudent && !isParent) {
     throw new AppError(403, "Portal is available to students and parents", "PORTAL_FORBIDDEN");
   }
-  const links = await resolveAccessibleStudents(tenantId, viewer);
+  let links: Awaited<ReturnType<typeof resolveAccessibleStudents>> = [];
+  try {
+    links = await resolveAccessibleStudents(tenantId, viewer);
+  } catch (error) {
+    console.error("[portal/overview] resolve students", error);
+    throw new AppError(
+      503,
+      "Portal profile could not be loaded. Check student/guardian linking.",
+      "PORTAL_OVERVIEW_UNAVAILABLE",
+    );
+  }
   if (!links.length) {
     throw new AppError(
       404,
@@ -336,12 +456,27 @@ export async function getPortalOverview(
     );
   }
   const children = await Promise.all(
-    links.map((link) =>
-      buildStudentSnapshot(tenantId, link.student, productMode, {
-        relation: link.relation,
-        isPrimary: link.isPrimary,
-      }),
-    ),
+    links.map(async (link) => {
+      try {
+        return await buildStudentSnapshot(tenantId, link.student, productMode, {
+          relation: link.relation,
+          isPrimary: link.isPrimary,
+        });
+      } catch (error) {
+        console.error("[portal/overview] child snapshot", error);
+        return {
+          student: mapStudentProfile(link.student),
+          relation: link.relation,
+          isPrimary: link.isPrimary,
+          enrollment: null,
+          timetable: [],
+          homework: [],
+          attendance: { summary: null, recent: [] },
+          exams: [],
+          fees: null,
+        };
+      }
+    }),
   );
   const notices = await listPortalNotices(
     tenantId,

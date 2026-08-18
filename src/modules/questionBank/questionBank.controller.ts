@@ -8,8 +8,11 @@ import {
   createQuestion,
   createQuestionType,
   deleteCategory,
+  getQuestionBankDashboardStats,
   getQuestionBankModuleSettings,
   getQuestionById,
+  importQuestionsFromCsv,
+  buildQuestionBankImportTemplateCsv,
   listCategories,
   listDifficultyLevels,
   listQuestionTypes,
@@ -76,6 +79,10 @@ const settingsBody = z.object({
   allowTeachersToAddQuestions: z.boolean(),
 });
 
+const importBody = z.object({
+  csv: z.string().min(10).max(2_000_000),
+});
+
 const listQuery = z.object({
   subjectId: z.string().min(1).optional(),
   classId: z.string().min(1).optional(),
@@ -85,6 +92,7 @@ const listQuery = z.object({
   status: z.nativeEnum(QuestionStatus).optional(),
   search: z.string().optional(),
   tags: z.string().optional(),
+  createdById: z.string().min(1).optional(),
   page: z.coerce.number().int().positive().optional(),
   pageSize: z.coerce.number().int().positive().max(100).optional(),
 });
@@ -153,6 +161,27 @@ export async function createQuestionController(req: Request, res: Response) {
   });
 }
 
+export async function importQuestionsController(req: Request, res: Response) {
+  const body = importBody.parse(req.body);
+  res.json({
+    data: await importQuestionsFromCsv({
+      tenantId: tenantId(req),
+      createdById: req.auth!.userId,
+      csvText: body.csv,
+    }),
+  });
+}
+
+export async function downloadImportTemplateController(_req: Request, res: Response) {
+  const csv = buildQuestionBankImportTemplateCsv();
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    'attachment; filename="question_bank_import_template.csv"',
+  );
+  res.send(csv);
+}
+
 export async function updateQuestionController(req: Request, res: Response) {
   const { id } = idParams.parse(req.params);
   res.json({
@@ -195,6 +224,12 @@ export async function listDifficultyLevelsController(req: Request, res: Response
 export async function createDifficultyLevelController(req: Request, res: Response) {
   res.status(201).json({
     data: await createDifficultyLevel(tenantId(req), difficultyBody.parse(req.body)),
+  });
+}
+
+export async function getStatsController(req: Request, res: Response) {
+  res.json({
+    data: await getQuestionBankDashboardStats(tenantId(req), req.auth!.userId),
   });
 }
 

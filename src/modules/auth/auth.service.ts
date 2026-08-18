@@ -40,20 +40,48 @@ interface AccessTokenPayload extends jwt.JwtPayload {
   resellerId: string | null;
 }
 
-const userInclude = {
+const userTenantInclude = {
   tenant: true,
-  roles: {
-    include: {
-      role: {
-        include: {
-          permissions: { include: { permission: true } },
-        },
-      },
-    },
-  },
 } satisfies Prisma.UserInclude;
 
-type LoadedUser = Prisma.UserGetPayload<{ include: typeof userInclude }>;
+const roleWithPermissionsInclude = {
+  permissions: { include: { permission: true } },
+} satisfies Prisma.RoleInclude;
+
+type LoadedUser = Prisma.UserGetPayload<{ include: typeof userTenantInclude }> & {
+  roles: Array<
+    Prisma.UserRoleGetPayload<{ include: { role: { include: typeof roleWithPermissionsInclude } } }>
+  >;
+};
+
+async function attachRoles(
+  user: Prisma.UserGetPayload<{ include: typeof userTenantInclude }>,
+): Promise<LoadedUser> {
+  const links = await prisma.userRole.findMany({
+    where: { userId: user.id },
+    select: { userId: true, roleId: true, tenantId: true },
+  });
+  const roleIds = [...new Set(links.map((link) => link.roleId))];
+  const roles = roleIds.length
+    ? await prisma.role.findMany({
+        where: { id: { in: roleIds } },
+        include: roleWithPermissionsInclude,
+      })
+    : [];
+  const byId = new Map(roles.map((role) => [role.id, role]));
+
+  return {
+    ...user,
+    roles: links.flatMap((link) => {
+      const role = byId.get(link.roleId);
+      if (!role) {
+        console.warn(`[auth] Skipping missing role ${link.roleId} for user ${link.userId}`);
+        return [];
+      }
+      return [{ userId: link.userId, roleId: link.roleId, tenantId: link.tenantId, role }];
+    }),
+  };
+}
 
 function getModuleSettings(tenantId: string | null) {
   return tenantId
@@ -92,13 +120,13 @@ async function findActiveUser(email: string, tenantSlug?: string) {
       status: UserStatus.ACTIVE,
       ...(tenant ? { tenantId: tenant.id } : { tenantId: null }),
     },
-    include: userInclude,
+    include: userTenantInclude,
   });
 
   if (!user || (user.tenant && user.tenant.status !== TenantStatus.ACTIVE)) {
     return null;
   }
-  return user;
+  return attachRoles(user);
 }
 
 function assertUserCanSignIn(user: LoadedUser) {
@@ -353,13 +381,13 @@ async function findActiveUserByPhoneOrEmail(identifier: string, tenantSlug?: str
           : []),
       ],
     },
-    include: userInclude,
+    include: userTenantInclude,
   });
 
   if (!user || (user.tenant && user.tenant.status !== TenantStatus.ACTIVE)) {
     return null;
   }
-  return user;
+  return attachRoles(user);
 }
 
 export async function loginWithMsg91Otp(input: {
@@ -517,7 +545,7 @@ export async function loginWithGoogle(input: {
       status: UserStatus.ACTIVE,
       ...(tenant ? { tenantId: tenant.id } : { tenantId: null }),
     },
-    include: userInclude,
+    include: userTenantInclude,
   });
 
   if (!user) {
@@ -527,14 +555,14 @@ export async function loginWithGoogle(input: {
         status: UserStatus.ACTIVE,
         ...(tenant ? { tenantId: tenant.id } : { tenantId: null }),
       },
-      include: userInclude,
+      include: userTenantInclude,
     });
 
     if (user) {
       user = await prisma.user.update({
         where: { id: user.id },
         data: { googleSubjectId: profile.googleSubjectId },
-        include: userInclude,
+        include: userTenantInclude,
       });
     }
   }
@@ -547,7 +575,7 @@ export async function loginWithGoogle(input: {
     );
   }
 
-  return buildLoginResult(user, { channel: input.channel });
+  return buildLoginResult(await attachRoles(user), { channel: input.channel });
 }
 
 export function getAuthPublicConfig() {
@@ -579,35 +607,26 @@ export async function resolveAuthContext(token: string): Promise<AuthContext> {
     throw new AppError(401, "Invalid access token", "INVALID_TOKEN");
   }
 
-  const user = await prisma.user.findFirst({
+  const found = await prisma.user.findFirst({
     where: {
       id: payload.sub,
       tenantId: payload.tenantId,
       resellerId: payload.resellerId,
       status: UserStatus.ACTIVE,
     },
-    include: {
-      tenant: true,
-      roles: {
-        where: { tenantId: payload.tenantId },
-        include: {
-          role: {
-            include: {
-              permissions: { include: { permission: true } },
-            },
-          },
-        },
-      },
-    },
+    include: userTenantInclude,
   });
 
   if (
-    !user ||
-    (user.tenant && user.tenant.status !== TenantStatus.ACTIVE) ||
-    user.tenantId !== payload.tenantId
+    !found ||
+    (found.tenant && found.tenant.status !== TenantStatus.ACTIVE) ||
+    found.tenantId !== payload.tenantId
   ) {
     throw new AppError(401, "Access is no longer valid", "INVALID_TOKEN");
   }
+
+  const user = await attachRoles(found);
+  const scopedRoles = user.roles.filter((link) => link.tenantId === payload.tenantId);
 
   return {
     userId: user.id,
@@ -615,10 +634,10 @@ export async function resolveAuthContext(token: string): Promise<AuthContext> {
     resellerId: user.resellerId,
     tenantType: user.tenant?.type ?? null,
     productMode: user.tenant?.productMode ?? null,
-    roles: user.roles.map(({ role }) => role.code),
+    roles: scopedRoles.map(({ role }) => role.code),
     permissions: [
       ...new Set(
-        user.roles.flatMap(({ role }) =>
+        scopedRoles.flatMap(({ role }) =>
           role.permissions.map(({ permission }) => permission.key),
         ),
       ),
@@ -710,16 +729,23 @@ const PORTAL_SELF_DELETE_ROLES = new Set(["STUDENT", "PARENT"]);
 export async function deleteOwnAccount(userId: string, input: { password: string }) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    include: {
-      roles: { include: { role: { select: { code: true } } } },
-    },
   });
   if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
   if (user.status !== UserStatus.ACTIVE) {
     throw new AppError(400, "Account is already inactive", "ACCOUNT_INACTIVE");
   }
 
-  const roleCodes = user.roles.map(({ role }) => role.code);
+  const links = await prisma.userRole.findMany({
+    where: { userId: user.id },
+    select: { roleId: true },
+  });
+  const roles = links.length
+    ? await prisma.role.findMany({
+        where: { id: { in: links.map((link) => link.roleId) } },
+        select: { code: true },
+      })
+    : [];
+  const roleCodes = roles.map((role) => role.code);
   const isPortalUser =
     roleCodes.length > 0 && roleCodes.every((code) => PORTAL_SELF_DELETE_ROLES.has(code));
   if (!isPortalUser) {

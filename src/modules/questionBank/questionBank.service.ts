@@ -341,6 +341,7 @@ export async function listQuestions(
     status?: QuestionStatus;
     search?: string;
     tags?: string[];
+    createdById?: string;
     page?: number;
     pageSize?: number;
   },
@@ -358,6 +359,7 @@ export async function listQuestions(
     ...(filters.questionTypeId ? { questionTypeId: filters.questionTypeId } : {}),
     ...(filters.difficultyLevelId ? { difficultyLevelId: filters.difficultyLevelId } : {}),
     ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.createdById ? { createdById: filters.createdById } : {}),
     ...(search
       ? { questionText: { contains: search, mode: "insensitive" as const } }
       : {}),
@@ -670,6 +672,130 @@ export async function createDifficultyLevel(
   }
 }
 
+export async function getQuestionBankDashboardStats(tenantId: string, userId: string) {
+  const notDeleted = { tenantId, deletedAt: null as null };
+
+  const [
+    total,
+    myQuestions,
+    typeGroups,
+    difficultyGroups,
+    subjectGroups,
+    categoryGroups,
+    types,
+    difficulties,
+    chapterGroups,
+  ] = await Promise.all([
+    prisma.question.count({ where: notDeleted }),
+    prisma.question.count({ where: { ...notDeleted, createdById: userId } }),
+    prisma.question.groupBy({
+      by: ["questionTypeId"],
+      where: notDeleted,
+      _count: { _all: true },
+    }),
+    prisma.question.groupBy({
+      by: ["difficultyLevelId"],
+      where: notDeleted,
+      _count: { _all: true },
+    }),
+    prisma.question.groupBy({
+      by: ["subjectId"],
+      where: notDeleted,
+      _count: { _all: true },
+    }),
+    prisma.question.groupBy({
+      by: ["categoryId"],
+      where: { ...notDeleted, categoryId: { not: null } },
+      _count: { _all: true },
+      orderBy: { _count: { categoryId: "desc" } },
+      take: 5,
+    }),
+    prisma.questionTypeConfig.findMany({
+      where: { tenantId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, name: true },
+    }),
+    prisma.difficultyLevelConfig.findMany({
+      where: { tenantId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, colorTag: true },
+    }),
+    prisma.questionCategory.groupBy({
+      by: ["subjectId"],
+      where: { tenantId },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const typeCountMap = new Map(typeGroups.map((row) => [row.questionTypeId, row._count._all]));
+  const difficultyCountMap = new Map(
+    difficultyGroups.map((row) => [row.difficultyLevelId, row._count._all]),
+  );
+  const chapterCountMap = new Map(chapterGroups.map((row) => [row.subjectId, row._count._all]));
+
+  const subjectIds = subjectGroups.map((row) => row.subjectId);
+  const topCategoryIds = categoryGroups
+    .map((row) => row.categoryId)
+    .filter((id): id is string => Boolean(id));
+
+  const [subjects, topCategories] = await Promise.all([
+    subjectIds.length
+      ? prisma.subject.findMany({
+          where: { id: { in: subjectIds }, tenantId },
+          select: { id: true, name: true },
+        })
+      : Promise.resolve([] as Array<{ id: string; name: string }>),
+    topCategoryIds.length
+      ? prisma.questionCategory.findMany({
+          where: { id: { in: topCategoryIds }, tenantId },
+          select: {
+            id: true,
+            name: true,
+            subject: { select: { name: true } },
+          },
+        })
+      : Promise.resolve(
+          [] as Array<{ id: string; name: string; subject: { name: string } }>,
+        ),
+  ]);
+
+  const subjectNameMap = new Map(subjects.map((row) => [row.id, row.name]));
+  const categoryMap = new Map(topCategories.map((row) => [row.id, row]));
+
+  return {
+    total,
+    myQuestions,
+    byType: types.map((row) => ({
+      id: row.id,
+      name: row.name,
+      count: typeCountMap.get(row.id) ?? 0,
+    })),
+    byDifficulty: difficulties.map((row) => ({
+      id: row.id,
+      name: row.name,
+      colorTag: row.colorTag,
+      count: difficultyCountMap.get(row.id) ?? 0,
+    })),
+    bySubject: subjectGroups.map((row) => ({
+      id: row.subjectId,
+      name: subjectNameMap.get(row.subjectId) ?? "Unknown",
+      questionCount: row._count._all,
+      chapterCount: chapterCountMap.get(row.subjectId) ?? 0,
+    })),
+    topTopics: categoryGroups
+      .filter((row): row is typeof row & { categoryId: string } => Boolean(row.categoryId))
+      .map((row) => {
+        const category = categoryMap.get(row.categoryId);
+        return {
+          id: row.categoryId,
+          name: category?.name ?? "Unknown",
+          subjectName: category?.subject.name ?? "Unknown",
+          count: row._count._all,
+        };
+      }),
+  };
+}
+
 export async function getQuestionBankModuleSettings(tenantId: string) {
   await ensureDefaultsIfEmpty(tenantId);
   return prisma.tenantQuestionBankSetting.upsert({
@@ -714,4 +840,365 @@ export async function updateQuestionBankModuleSettings(
       updatedAt: true,
     },
   });
+}
+
+const IMPORT_MAX_ROWS = 500;
+
+export const QUESTION_BANK_IMPORT_HEADERS = [
+  "subject",
+  "question_type",
+  "difficulty",
+  "question_text",
+  "class",
+  "chapter",
+  "marks",
+  "negative_marks",
+  "explanation",
+  "tags",
+  "option_1",
+  "option_2",
+  "option_3",
+  "option_4",
+  "correct_option",
+] as const;
+
+export function buildQuestionBankImportTemplateCsv() {
+  const header = QUESTION_BANK_IMPORT_HEADERS.join(",");
+  const sample = [
+    "Mathematics",
+    "MCQ",
+    "Medium",
+    '"If a^2 + b^2 = 25 and ab = 12, find (a - b)^2."',
+    "Class 10",
+    "Quadratic Equations",
+    "1",
+    "",
+    '"Use (a-b)^2 = a^2 + b^2 - 2ab"',
+    "algebra;quadratic",
+    "1",
+    "13",
+    "37",
+    "25",
+    "2",
+  ].join(",");
+  const sample2 = [
+    "Science",
+    "Long Answer",
+    "Hard",
+    '"Explain the process of photosynthesis in detail."',
+    "Class 10",
+    "Life Processes",
+    "5",
+    "",
+    "",
+    "biology",
+    "",
+    "",
+    "",
+    "",
+    "",
+  ].join(",");
+  return `${header}\n${sample}\n${sample2}\n`;
+}
+
+export type QuestionImportFailure = {
+  row: number;
+  message: string;
+  questionText?: string;
+};
+
+export type QuestionImportResult = {
+  created: number;
+  failed: number;
+  failures: QuestionImportFailure[];
+};
+
+function splitCsvLine(line: string) {
+  const cells: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i]!;
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      cells.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current);
+  return cells;
+}
+
+function normalizeHeader(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_")
+    .replace(/[^a-z0-9_]/g, "");
+}
+
+function headerAliases(header: string) {
+  const map: Record<string, string> = {
+    subject_name: "subject",
+    subjectid: "subject",
+    subject_id: "subject",
+    type: "question_type",
+    questiontype: "question_type",
+    question_type_name: "question_type",
+    difficulty_level: "difficulty",
+    difficulty_name: "difficulty",
+    question: "question_text",
+    text: "question_text",
+    class_name: "class",
+    classname: "class",
+    category: "chapter",
+    category_name: "chapter",
+    chapter_name: "chapter",
+    negative: "negative_marks",
+    negativemarks: "negative_marks",
+    optiona: "option_1",
+    optionb: "option_2",
+    optionc: "option_3",
+    optiond: "option_4",
+    option1: "option_1",
+    option2: "option_2",
+    option3: "option_3",
+    option4: "option_4",
+    correct: "correct_option",
+    correctoptions: "correct_option",
+    correct_options: "correct_option",
+    answer: "correct_option",
+  };
+  return map[header] ?? header;
+}
+
+function parseOptionalNumber(value: string | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num)) {
+    throw new AppError(400, `Invalid number: ${trimmed}`, "INVALID_NUMBER");
+  }
+  return num;
+}
+
+function parseCorrectIndexes(raw: string | undefined, optionCount: number) {
+  if (!raw?.trim() || optionCount === 0) return [] as number[];
+  const tokens = raw
+    .split(/[|;,/]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const indexes = new Set<number>();
+  for (const token of tokens) {
+    const letter = token.toUpperCase();
+    if (/^[A-D]$/.test(letter)) {
+      indexes.add(letter.charCodeAt(0) - 65);
+      continue;
+    }
+    const asNumber = Number(token);
+    if (Number.isInteger(asNumber) && asNumber >= 1 && asNumber <= optionCount) {
+      indexes.add(asNumber - 1);
+      continue;
+    }
+    throw new AppError(
+      400,
+      `correct_option must be 1-${optionCount} or A-D (got "${token}")`,
+      "INVALID_CORRECT_OPTION",
+    );
+  }
+  return [...indexes];
+}
+
+function matchByName<T extends { id: string; name: string }>(
+  rows: T[],
+  value: string,
+  label: string,
+) {
+  const needle = value.trim().toLowerCase();
+  if (!needle) {
+    throw new AppError(400, `${label} is required`, "REQUIRED_FIELD");
+  }
+  const exact = rows.find((row) => row.name.toLowerCase() === needle);
+  if (exact) return exact;
+  const starts = rows.filter((row) => row.name.toLowerCase().startsWith(needle));
+  if (starts.length === 1) return starts[0]!;
+  const contains = rows.filter((row) => row.name.toLowerCase().includes(needle));
+  if (contains.length === 1) return contains[0]!;
+  throw new AppError(400, `Unknown ${label}: ${value}`, "LOOKUP_FAILED");
+}
+
+/**
+ * Bulk-import questions from CSV. Reuses `createQuestion` per row and returns
+ * a reviewable failure list (same pattern as students CSV import).
+ */
+export async function importQuestionsFromCsv(input: {
+  tenantId: string;
+  createdById: string;
+  csvText: string;
+}): Promise<QuestionImportResult> {
+  const lines = input.csvText
+    .replace(/^\uFEFF/, "")
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+
+  if (lines.length < 2) {
+    throw new AppError(
+      400,
+      "CSV must include a header row and at least one data row",
+      "CSV_EMPTY",
+    );
+  }
+
+  const headers = splitCsvLine(lines[0]!).map((header) =>
+    headerAliases(normalizeHeader(header)),
+  );
+  const required = ["subject", "question_type", "difficulty", "question_text"] as const;
+  for (const key of required) {
+    if (!headers.includes(key)) {
+      throw new AppError(400, `CSV is missing required column: ${key}`, "CSV_HEADER");
+    }
+  }
+
+  const dataRowCount = lines.length - 1;
+  if (dataRowCount > IMPORT_MAX_ROWS) {
+    throw new AppError(
+      400,
+      `CSV has ${dataRowCount} rows; maximum is ${IMPORT_MAX_ROWS}`,
+      "CSV_TOO_LARGE",
+    );
+  }
+
+  const [subjects, classes, types, difficulties, categories] = await Promise.all([
+    prisma.subject.findMany({
+      where: { tenantId: input.tenantId },
+      select: { id: true, name: true },
+    }),
+    prisma.academicClass.findMany({
+      where: { tenantId: input.tenantId },
+      select: { id: true, name: true },
+    }),
+    prisma.questionTypeConfig.findMany({
+      where: { tenantId: input.tenantId, isActive: true },
+      select: { id: true, name: true },
+    }),
+    prisma.difficultyLevelConfig.findMany({
+      where: { tenantId: input.tenantId, isActive: true },
+      select: { id: true, name: true },
+    }),
+    prisma.questionCategory.findMany({
+      where: { tenantId: input.tenantId },
+      select: { id: true, name: true, subjectId: true },
+    }),
+  ]);
+
+  let created = 0;
+  const failures: QuestionImportFailure[] = [];
+
+  for (let index = 1; index < lines.length; index += 1) {
+    const values = splitCsvLine(lines[index]!);
+    const row: Record<string, string> = {};
+    headers.forEach((header, i) => {
+      row[header] = (values[i] ?? "").trim();
+    });
+
+    const questionText = row.question_text ?? "";
+    try {
+      if (!questionText) {
+        throw new AppError(400, "question_text is required", "REQUIRED_FIELD");
+      }
+
+      const subject = matchByName(subjects, row.subject ?? "", "subject");
+      const questionType = matchByName(types, row.question_type ?? "", "question_type");
+      const difficulty = matchByName(difficulties, row.difficulty ?? "", "difficulty");
+
+      let classId: string | null = null;
+      if (row.class) {
+        classId = matchByName(classes, row.class, "class").id;
+      }
+
+      let categoryId: string | null = null;
+      if (row.chapter) {
+        const chapterNeedle = row.chapter.toLowerCase();
+        const scoped = categories.filter((cat) => cat.subjectId === subject.id);
+        const exact = scoped.find((cat) => cat.name.toLowerCase() === chapterNeedle);
+        const contains = scoped.filter((cat) => cat.name.toLowerCase().includes(chapterNeedle));
+        const category = exact ?? (contains.length === 1 ? contains[0] : null);
+        if (!category) {
+          throw new AppError(
+            400,
+            `Unknown chapter for ${subject.name}: ${row.chapter}`,
+            "INVALID_CHAPTER",
+          );
+        }
+        categoryId = category.id;
+      }
+
+      const optionTexts = [row.option_1, row.option_2, row.option_3, row.option_4]
+        .map((value) => (value ?? "").trim())
+        .filter(Boolean);
+      const correctIndexes = parseCorrectIndexes(row.correct_option, optionTexts.length);
+      const options =
+        optionTexts.length > 0
+          ? optionTexts.map((optionText, idx) => ({
+              optionText,
+              isCorrect: correctIndexes.includes(idx),
+              sortOrder: idx,
+            }))
+          : undefined;
+
+      if (options?.length && correctIndexes.length === 0) {
+        throw new AppError(
+          400,
+          "correct_option is required when options are provided",
+          "CORRECT_OPTION_REQUIRED",
+        );
+      }
+
+      const tags = (row.tags ?? "")
+        .split(/[|;,]+/)
+        .map((tag) => tag.trim())
+        .filter(Boolean);
+
+      await createQuestion({
+        tenantId: input.tenantId,
+        createdById: input.createdById,
+        subjectId: subject.id,
+        classId,
+        categoryId,
+        questionTypeId: questionType.id,
+        difficultyLevelId: difficulty.id,
+        questionText,
+        explanation: row.explanation || null,
+        marks: parseOptionalNumber(row.marks),
+        negativeMarks: parseOptionalNumber(row.negative_marks) ?? null,
+        tags,
+        source: QuestionSource.IMPORTED,
+        options,
+      });
+      created += 1;
+    } catch (cause) {
+      failures.push({
+        row: index + 1,
+        message: cause instanceof AppError ? cause.message : "Failed to import row",
+        questionText: questionText.slice(0, 120) || undefined,
+      });
+    }
+  }
+
+  return {
+    created,
+    failed: failures.length,
+    failures,
+  };
 }
