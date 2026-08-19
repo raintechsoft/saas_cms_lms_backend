@@ -494,13 +494,16 @@ export async function updatePortalStudentProfile(
     },
   });
 
-  if (student.userId && (input.firstName || input.lastName || input.photoUrl || input.mobile)) {
+  if (student.userId && (input.firstName || input.lastName || input.photoUrl || input.mobile || input.email)) {
     await prisma.user.update({
       where: { id: student.userId },
       data: {
         ...(input.firstName !== undefined ? { firstName: input.firstName.trim() } : {}),
         ...(input.lastName !== undefined ? { lastName: input.lastName?.trim() || "" } : {}),
         ...(input.mobile !== undefined ? { phone: input.mobile?.trim() || null } : {}),
+        ...(input.email !== undefined && input.email?.trim()
+          ? { email: input.email.trim().toLowerCase() }
+          : {}),
         ...(input.photoUrl !== undefined ? { avatarUrl: input.photoUrl } : {}),
       },
     });

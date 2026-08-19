@@ -437,14 +437,51 @@ export async function updateStudent(tenantId: string, id: string, input: UpdateS
   if (input.status === "DISABLED" && !input.disabledReason?.trim()) {
     throw new AppError(400, "Disable reason is required", "DISABLE_REASON_REQUIRED");
   }
-  return prisma.student.update({
-    where: { id },
-    data: {
-      ...input,
-      email: input.email === undefined ? undefined : input.email?.trim().toLowerCase() || null,
-      disabledReason: input.status === "ACTIVE" ? null : input.disabledReason,
-    },
-    include: studentInclude,
+
+  const normalizedEmail =
+    input.email === undefined ? undefined : input.email?.trim().toLowerCase() || null;
+
+  if (normalizedEmail && student.userId) {
+    const conflict = await prisma.user.findFirst({
+      where: tenantScope(tenantId, {
+        email: normalizedEmail,
+        id: { not: student.userId },
+      }),
+      select: { id: true },
+    });
+    if (conflict) {
+      throw new AppError(
+        409,
+        `Login email already in use: ${normalizedEmail}`,
+        "STUDENT_LOGIN_EXISTS",
+      );
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const updated = await tx.student.update({
+      where: { id },
+      data: {
+        ...input,
+        email: normalizedEmail,
+        disabledReason: input.status === "ACTIVE" ? null : input.disabledReason,
+      },
+      include: studentInclude,
+    });
+
+    if (student.userId) {
+      await tx.user.update({
+        where: { id: student.userId },
+        data: {
+          ...(input.firstName !== undefined ? { firstName: input.firstName.trim() } : {}),
+          ...(input.lastName !== undefined ? { lastName: input.lastName?.trim() || "" } : {}),
+          ...(input.mobile !== undefined ? { phone: input.mobile?.trim() || null } : {}),
+          ...(normalizedEmail ? { email: normalizedEmail } : {}),
+        },
+      });
+    }
+
+    return updated;
   });
 }
 

@@ -126,14 +126,39 @@ async function findActiveUser(email: string, tenantSlug?: string) {
     throw new AppError(401, "Invalid credentials", "INVALID_CREDENTIALS");
   }
 
-  const user = await prisma.user.findFirst({
+  const normalizedEmail = email.trim().toLowerCase();
+
+  let user = await prisma.user.findFirst({
     where: {
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       status: UserStatus.ACTIVE,
       ...(tenant ? { tenantId: tenant.id } : { tenantId: null }),
     },
     include: userTenantInclude,
   });
+
+  if (!user) {
+    const student = await prisma.student.findFirst({
+      where: {
+        status: StudentStatus.ACTIVE,
+        ...(tenant ? { tenantId: tenant.id } : {}),
+        userId: { not: null },
+        email: { equals: normalizedEmail, mode: "insensitive" },
+      },
+      select: { userId: true },
+    });
+
+    if (student?.userId) {
+      user = await prisma.user.findFirst({
+        where: {
+          id: student.userId,
+          status: UserStatus.ACTIVE,
+          ...(tenant ? { tenantId: tenant.id } : {}),
+        },
+        include: userTenantInclude,
+      });
+    }
+  }
 
   if (!user || (user.tenant && user.tenant.status !== TenantStatus.ACTIVE)) {
     return null;
