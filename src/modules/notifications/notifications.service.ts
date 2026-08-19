@@ -35,6 +35,82 @@ function relevantAudiences(roleCodes: string[]) {
   return audiences;
 }
 
+async function resolvePortalClassSectionIds(
+  tenantId: string,
+  userId: string,
+  roleCodes: string[],
+) {
+  const ids = new Set<string>();
+
+  if (roleCodes.includes("STUDENT")) {
+    const student = await prisma.student.findFirst({
+      where: tenantScope(tenantId, { userId }),
+      select: {
+        enrollments: {
+          where: { status: EnrollmentStatus.ACTIVE },
+          select: { classSectionId: true },
+        },
+      },
+    });
+    for (const enrollment of student?.enrollments ?? []) {
+      ids.add(enrollment.classSectionId);
+    }
+  }
+
+  if (roleCodes.includes("PARENT")) {
+    const links = await prisma.studentGuardian.findMany({
+      where: tenantScope(tenantId, { userId }),
+      select: {
+        student: {
+          select: {
+            enrollments: {
+              where: { status: EnrollmentStatus.ACTIVE },
+              select: { classSectionId: true },
+            },
+          },
+        },
+      },
+    });
+    for (const link of links) {
+      for (const enrollment of link.student.enrollments) {
+        ids.add(enrollment.classSectionId);
+      }
+    }
+  }
+
+  return [...ids];
+}
+
+/** Portal inbox: personal alerts + school-wide/class broadcasts only. */
+function buildPortalInboxWhere(
+  userId: string,
+  audiences: NoticeAudience[],
+  classSectionIds: string[],
+) {
+  const classScope =
+    classSectionIds.length > 0
+      ? { OR: [{ classSectionId: null }, { classSectionId: { in: classSectionIds } }] }
+      : { classSectionId: null };
+
+  return {
+    OR: [
+      { targetUserId: userId },
+      {
+        targetUserId: null,
+        audience: { in: audiences },
+        AND: [classScope],
+      },
+    ],
+  };
+}
+
+async function resolvePortalInboxWhere(tenantId: string, userId: string) {
+  const roleCodes = await getUserRoleCodes(tenantId, userId);
+  const audiences = relevantAudiences(roleCodes);
+  const classSectionIds = await resolvePortalClassSectionIds(tenantId, userId, roleCodes);
+  return buildPortalInboxWhere(userId, audiences, classSectionIds);
+}
+
 type PushSubscriptionInput = {
   endpoint: string;
   keys: { p256dh: string; auth: string };
@@ -192,18 +268,11 @@ export async function listNotifications(
   options?: { scope?: "inbox" | "all" },
 ) {
   const scope = options?.scope ?? "inbox";
-  const roleCodes = await getUserRoleCodes(tenantId, userId);
-  const audiences = relevantAudiences(roleCodes);
+  const inboxWhere =
+    scope === "all" ? {} : await resolvePortalInboxWhere(tenantId, userId);
 
   const notifications = await prisma.notification.findMany({
-    where: tenantScope(
-      tenantId,
-      scope === "all"
-        ? {}
-        : {
-            OR: [{ audience: { in: audiences } }, { targetUserId: userId }],
-          },
-    ),
+    where: tenantScope(tenantId, inboxWhere),
     orderBy: { createdAt: "desc" },
     take: limit,
   });
@@ -224,12 +293,11 @@ export async function listNotifications(
 }
 
 export async function getUnreadCount(tenantId: string, userId: string) {
-  const roleCodes = await getUserRoleCodes(tenantId, userId);
-  const audiences = relevantAudiences(roleCodes);
+  const inboxWhere = await resolvePortalInboxWhere(tenantId, userId);
 
   return prisma.notification.count({
     where: tenantScope(tenantId, {
-      OR: [{ audience: { in: audiences } }, { targetUserId: userId }],
+      ...inboxWhere,
       reads: { none: { userId } },
     }),
   });
@@ -467,8 +535,9 @@ export async function markRead(
   userId: string,
   notificationId: string,
 ) {
+  const inboxWhere = await resolvePortalInboxWhere(tenantId, userId);
   const exists = await prisma.notification.findFirst({
-    where: tenantScope(tenantId, { id: notificationId }),
+    where: tenantScope(tenantId, { id: notificationId, ...inboxWhere }),
     select: { id: true },
   });
   if (!exists) throw new AppError(404, "Notification not found", "NOTIFICATION_NOT_FOUND");
@@ -481,12 +550,11 @@ export async function markRead(
 }
 
 export async function markAllRead(tenantId: string, userId: string) {
-  const roleCodes = await getUserRoleCodes(tenantId, userId);
-  const audiences = relevantAudiences(roleCodes);
+  const inboxWhere = await resolvePortalInboxWhere(tenantId, userId);
 
   const unread = await prisma.notification.findMany({
     where: tenantScope(tenantId, {
-      OR: [{ audience: { in: audiences } }, { targetUserId: userId }],
+      ...inboxWhere,
       reads: { none: { userId } },
     }),
     select: { id: true },
