@@ -1,6 +1,12 @@
 import bcrypt from "bcryptjs";
 import jwt, { type SignOptions } from "jsonwebtoken";
-import { AuthVerificationPurpose, TenantStatus, UserStatus, type Prisma } from "@prisma/client";
+import {
+  AuthVerificationPurpose,
+  StudentStatus,
+  TenantStatus,
+  UserStatus,
+  type Prisma,
+} from "@prisma/client";
 import { env, isMsg91OtpWidgetConfigured } from "../../config/env.js";
 import {
   AUTH_CODE_TTL,
@@ -17,7 +23,7 @@ import {
   resetPasswordEmailHtml,
   sendMail,
 } from "../../lib/mail.js";
-import { normalizeSmsNumber, toMsg91Mobile } from "../../lib/sms.js";
+import { isSmsConfigured, normalizeSmsNumber, sendSms, toMsg91Mobile } from "../../lib/sms.js";
 import { prisma } from "../../lib/prisma.js";
 import type { AuthContext } from "../../types/express.js";
 
@@ -30,6 +36,12 @@ interface LoginInput {
 
 interface TenantScopedInput {
   email: string;
+  tenantSlug?: string;
+  channel?: "WEB" | "APP";
+}
+
+interface PhoneScopedInput {
+  phone: string;
   tenantSlug?: string;
   channel?: "WEB" | "APP";
 }
@@ -299,6 +311,68 @@ export async function verifyLoginOtp(input: TenantScopedInput & { code: string }
   return buildLoginResult(user, { channel: input.channel });
 }
 
+export async function requestPhoneLoginOtp(input: PhoneScopedInput) {
+  const user = await findActiveUserByPhoneOrEmail(input.phone, input.tenantSlug);
+  const genericMessage =
+    "If the account exists, a sign-in code was sent to your mobile.";
+
+  if (!user) {
+    return { message: genericMessage };
+  }
+
+  const code = generateOtpCode();
+  await createAuthVerification({
+    userId: user.id,
+    purpose: AuthVerificationPurpose.LOGIN_OTP,
+    code,
+    ttlMs: AUTH_CODE_TTL.OTP,
+  });
+
+  const workspaceName = user.tenant?.name ?? "SaaS CMS LMS";
+  const smsBody = `${code} is your ${workspaceName} sign-in code. Valid for 10 minutes.`;
+
+  let smsDelivered = false;
+  if (user.tenantId) {
+    try {
+      const result = await sendSms({
+        tenantId: user.tenantId,
+        to: input.phone,
+        body: smsBody,
+        category: "OTP",
+      });
+      smsDelivered = result.delivered === true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[auth] Phone OTP SMS failed for ${input.phone}: ${message}`);
+    }
+  }
+
+  const response: { message: string; devCode?: string } = { message: genericMessage };
+  if (env.NODE_ENV === "development" || !smsDelivered || !isSmsConfigured()) {
+    response.devCode = code;
+    console.info(`[auth] Phone OTP for ${input.phone}: ${code}`);
+  }
+  return response;
+}
+
+export async function verifyPhoneLoginOtp(input: PhoneScopedInput & { code: string }) {
+  const user = await findActiveUserByPhoneOrEmail(input.phone, input.tenantSlug);
+  if (!user) {
+    throw new AppError(401, "Invalid credentials", "INVALID_CREDENTIALS");
+  }
+
+  const verified = await consumeAuthVerification({
+    userId: user.id,
+    purpose: AuthVerificationPurpose.LOGIN_OTP,
+    code: input.code.trim(),
+  });
+  if (!verified) {
+    throw new AppError(401, "Invalid or expired sign-in code", "INVALID_OTP");
+  }
+
+  return buildLoginResult(user, { channel: input.channel });
+}
+
 async function verifyMsg91WidgetAccessToken(accessToken: string) {
   if (!env.MSG91_AUTH_KEY) {
     throw new AppError(503, "MSG91 OTP is not configured", "MSG91_OTP_NOT_CONFIGURED");
@@ -370,7 +444,7 @@ async function findActiveUserByPhoneOrEmail(identifier: string, tenantSlug?: str
   const last10 = mobile.replace(/\D/g, "").slice(-10);
   const phoneVariants = [...new Set([identifier, mobile, e164, `+${mobile}`, last10, `91${last10}`, `+91${last10}`].filter(Boolean))];
 
-  const user = await prisma.user.findFirst({
+  let user = await prisma.user.findFirst({
     where: {
       status: UserStatus.ACTIVE,
       ...(tenant ? { tenantId: tenant.id } : { tenantId: null }),
@@ -383,6 +457,33 @@ async function findActiveUserByPhoneOrEmail(identifier: string, tenantSlug?: str
     },
     include: userTenantInclude,
   });
+
+  if (!user && last10.length === 10) {
+    const student = await prisma.student.findFirst({
+      where: {
+        status: StudentStatus.ACTIVE,
+        ...(tenant ? { tenantId: tenant.id } : {}),
+        userId: { not: null },
+        OR: [
+          ...phoneVariants.map((mobile) => ({ mobile })),
+          { mobile: { endsWith: last10 } },
+          { mobile: { contains: last10 } },
+        ],
+      },
+      select: { userId: true },
+    });
+
+    if (student?.userId) {
+      user = await prisma.user.findFirst({
+        where: {
+          id: student.userId,
+          status: UserStatus.ACTIVE,
+          ...(tenant ? { tenantId: tenant.id } : {}),
+        },
+        include: userTenantInclude,
+      });
+    }
+  }
 
   if (!user || (user.tenant && user.tenant.status !== TenantStatus.ACTIVE)) {
     return null;

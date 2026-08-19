@@ -28,6 +28,8 @@ const allowedOrigins = new Set([
   "https://universe-ai-solution-saas.onrender.com",
 ]);
 
+
+
 function normalizeOrigin(origin: string | undefined): string {
   return (origin ?? "").trim().replace(/\/+$/, "");
 }

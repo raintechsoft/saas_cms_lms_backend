@@ -12,10 +12,12 @@ import {
   loginWithGoogle,
   loginWithMsg91Otp,
   requestLoginOtp,
+  requestPhoneLoginOtp,
   resetPassword,
   updateOwnAvatar,
   updateOwnProfile,
   verifyLoginOtp,
+  verifyPhoneLoginOtp,
 } from "./auth.service.js";
 
 const loginSchema = z.object({
@@ -32,6 +34,16 @@ const tenantScopedSchema = z.object({
 });
 
 const verifyOtpSchema = tenantScopedSchema.extend({
+  code: z.string().min(4).max(64),
+});
+
+const phoneScopedSchema = z.object({
+  phone: z.string().trim().min(8).max(30),
+  tenantSlug: z.string().min(2).max(100).optional(),
+  channel: z.enum(["WEB", "APP"]).optional(),
+});
+
+const verifyPhoneOtpSchema = phoneScopedSchema.extend({
   code: z.string().min(4).max(64),
 });
 
@@ -124,6 +136,17 @@ export async function requestOtpController(req: Request, res: Response) {
 export async function verifyOtpController(req: Request, res: Response) {
   const input = verifyOtpSchema.parse(req.body);
   const result = await verifyLoginOtp(input);
+  res.json({ data: result });
+}
+
+export async function requestPhoneOtpController(req: Request, res: Response) {
+  const input = phoneScopedSchema.parse(req.body);
+  res.json({ data: await requestPhoneLoginOtp(input) });
+}
+
+export async function verifyPhoneOtpController(req: Request, res: Response) {
+  const input = verifyPhoneOtpSchema.parse(req.body);
+  const result = await verifyPhoneLoginOtp(input);
   res.json({ data: result });
 }
 

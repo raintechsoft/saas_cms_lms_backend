@@ -12,10 +12,12 @@ import {
   meController,
   msg91OtpLoginController,
   requestOtpController,
+  requestPhoneOtpController,
   resetPasswordController,
   updateProfileController,
   uploadAvatarController,
   verifyOtpController,
+  verifyPhoneOtpController,
 } from "../../modules/auth/auth.controller.js";
 import { dashboardController } from "../../modules/dashboard/dashboard.controller.js";
 
@@ -25,6 +27,8 @@ authRouter.get("/auth/config", asyncHandler(authConfigController));
 authRouter.post("/auth/login", asyncHandler(loginController));
 authRouter.post("/auth/otp/request", asyncHandler(requestOtpController));
 authRouter.post("/auth/otp/verify", asyncHandler(verifyOtpController));
+authRouter.post("/auth/otp/phone/request", asyncHandler(requestPhoneOtpController));
+authRouter.post("/auth/otp/phone/verify", asyncHandler(verifyPhoneOtpController));
 authRouter.post("/auth/otp/msg91", asyncHandler(msg91OtpLoginController));
 authRouter.post("/auth/forgot-password", asyncHandler(forgotPasswordController));
 authRouter.post("/auth/reset-password", asyncHandler(resetPasswordController));
