@@ -1,5 +1,9 @@
 import bcrypt from "bcryptjs";
 import { UserStatus } from "@prisma/client";
+import {
+  invalidateAuthCacheForTenant,
+  invalidateAuthCacheForUser,
+} from "../../lib/auth-cache.js";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { normalizeSmsNumber } from "../../lib/sms.js";
@@ -129,7 +133,7 @@ export async function updateRole(
   });
   if (!role) throw new AppError(404, "Role not found", "ROLE_NOT_FOUND");
 
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     if (input.permissionIds) {
       await tx.rolePermission.deleteMany({ where: { roleId } });
     }
@@ -150,6 +154,9 @@ export async function updateRole(
       include: roleInclude,
     });
   });
+
+  invalidateAuthCacheForTenant(tenantId);
+  return updated;
 }
 
 export async function getStaffRolesSetup(tenantId: string) {
@@ -285,6 +292,10 @@ export async function assignStaffToRole(
     ),
   );
 
+  for (const userId of unique) {
+    invalidateAuthCacheForUser(userId);
+  }
+
   return getStaffRolesSetup(tenantId);
 }
 
@@ -304,6 +315,7 @@ export async function removeStaffFromRole(
   });
   if (!result.count) throw new AppError(404, "Staff assignment not found", "ASSIGNMENT_NOT_FOUND");
 
+  invalidateAuthCacheForUser(userId);
   return getStaffRolesSetup(tenantId);
 }
 
@@ -422,7 +434,7 @@ export async function updateUser(
     throw new AppError(400, "A valid mobile number is required", "PHONE_REQUIRED");
   }
 
-  return prisma.$transaction(async (tx) => {
+  const updated = await prisma.$transaction(async (tx) => {
     if (input.roleIds) {
       await tx.userRole.deleteMany({ where: { userId, tenantId } });
     }
@@ -452,6 +464,9 @@ export async function updateUser(
       },
     });
   });
+
+  invalidateAuthCacheForUser(userId);
+  return updated;
 }
 
 /** Soft-delete: disable the account. Hard delete only when the user has no linked profiles/history. */
@@ -499,10 +514,12 @@ export async function deleteUser(tenantId: string, actorUserId: string, userId: 
         roles: userInclude.roles,
       },
     });
+    invalidateAuthCacheForUser(userId);
     return { mode: "disabled" as const, user: data };
   }
 
   await prisma.userRole.deleteMany({ where: { userId, tenantId } });
   await prisma.user.delete({ where: { id: userId } });
+  invalidateAuthCacheForUser(userId);
   return { mode: "deleted" as const, id: userId };
 }

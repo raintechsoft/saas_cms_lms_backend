@@ -24,6 +24,11 @@ import {
   sendMail,
 } from "../../lib/mail.js";
 import { isSmsConfigured, normalizeSmsNumber, sendSms, toMsg91Mobile } from "../../lib/sms.js";
+import {
+  authCacheKey,
+  getCachedAuthContext,
+  setCachedAuthContext,
+} from "../../lib/auth-cache.js";
 import { prisma } from "../../lib/prisma.js";
 import type { AuthContext } from "../../types/express.js";
 
@@ -733,6 +738,12 @@ export async function resolveAuthContext(token: string): Promise<AuthContext> {
     throw new AppError(401, "Invalid access token", "INVALID_TOKEN");
   }
 
+  const cacheKey = authCacheKey(payload.sub, payload.tenantId, payload.resellerId);
+  const cached = getCachedAuthContext(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const found = await prisma.user.findFirst({
     where: {
       id: payload.sub,
@@ -754,7 +765,7 @@ export async function resolveAuthContext(token: string): Promise<AuthContext> {
   const user = await attachRoles(found);
   const scopedRoles = user.roles.filter((link) => link.tenantId === payload.tenantId);
 
-  return {
+  const auth: AuthContext = {
     userId: user.id,
     tenantId: user.tenantId,
     resellerId: user.resellerId,
@@ -769,6 +780,9 @@ export async function resolveAuthContext(token: string): Promise<AuthContext> {
       ),
     ],
   };
+
+  setCachedAuthContext(cacheKey, user.id, auth);
+  return auth;
 }
 
 export async function getCurrentUser(token: string) {

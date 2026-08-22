@@ -81,18 +81,57 @@ async function resolvePortalClassSectionIds(
   return [...ids];
 }
 
+async function resolvePortalNotificationSince(
+  tenantId: string,
+  userId: string,
+  roleCodes: string[],
+) {
+  const user = await prisma.user.findFirst({
+    where: tenantScope(tenantId, { id: userId }),
+    select: { createdAt: true },
+  });
+  if (!user) return null;
+
+  let sinceMs = user.createdAt.getTime();
+
+  if (roleCodes.includes("STUDENT")) {
+    const student = await prisma.student.findFirst({
+      where: tenantScope(tenantId, { userId }),
+      select: { createdAt: true },
+    });
+    if (student) {
+      sinceMs = Math.max(sinceMs, student.createdAt.getTime());
+    }
+  }
+
+  if (roleCodes.includes("PARENT")) {
+    const links = await prisma.studentGuardian.findMany({
+      where: tenantScope(tenantId, { userId }),
+      select: { createdAt: true },
+      orderBy: { createdAt: "asc" },
+      take: 1,
+    });
+    if (links[0]) {
+      sinceMs = Math.max(sinceMs, links[0].createdAt.getTime());
+    }
+  }
+
+  return new Date(sinceMs);
+}
+
 /** Portal inbox: personal alerts + school-wide/class broadcasts only. */
 function buildPortalInboxWhere(
   userId: string,
   audiences: NoticeAudience[],
   classSectionIds: string[],
+  since?: Date | null,
 ) {
   const classScope =
     classSectionIds.length > 0
       ? { OR: [{ classSectionId: null }, { classSectionId: { in: classSectionIds } }] }
       : { classSectionId: null };
 
-  return {
+  const inboxWhere = {
     OR: [
       { targetUserId: userId },
       {
@@ -102,13 +141,20 @@ function buildPortalInboxWhere(
       },
     ],
   };
+
+  if (!since) return inboxWhere;
+
+  return {
+    AND: [inboxWhere, { createdAt: { gte: since } }],
+  };
 }
 
 async function resolvePortalInboxWhere(tenantId: string, userId: string) {
   const roleCodes = await getUserRoleCodes(tenantId, userId);
   const audiences = relevantAudiences(roleCodes);
   const classSectionIds = await resolvePortalClassSectionIds(tenantId, userId, roleCodes);
-  return buildPortalInboxWhere(userId, audiences, classSectionIds);
+  const since = await resolvePortalNotificationSince(tenantId, userId, roleCodes);
+  return buildPortalInboxWhere(userId, audiences, classSectionIds, since);
 }
 
 type PushSubscriptionInput = {
